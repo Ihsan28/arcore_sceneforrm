@@ -34,15 +34,3 @@ fun Poi.getPositionVector(azimuth: Float, latLng: LatLng): Vector3 {
     val z = r * cos(azimuth + heading).toFloat()
     return Vector3(x, y, z)
 }
-
-data class Geometry(
-    val location: GeometryLocation
-)
-
-data class GeometryLocation(
-    val lat: Double,
-    val lng: Double
-) {
-    val latLng: LatLng
-        get() = LatLng(lat, lng)
-}
