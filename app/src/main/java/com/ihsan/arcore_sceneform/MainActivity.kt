@@ -71,7 +71,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         setContentView(R.layout.activity_main)
 
         arFragment = supportFragmentManager.findFragmentById(R.id.ar_fragment) as PlacesArFragment
-        arFragment.arSceneView.planeRenderer.isEnabled = false
+        //arFragment.arSceneView.planeRenderer.isEnabled = false
+        arFragment.arSceneView.scene.addOnUpdateListener {
+            arFragment.onUpdate(it)
+        }
+        arFragment.arSceneView.scene.camera.nearClipPlane = 0.5f
+        arFragment.arSceneView.scene.camera.farClipPlane = 750f
 
         sensorManager = getSystemService()!!
         //placesService = PlacesService.create()
@@ -101,6 +106,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 override fun onPoiDirectionResponse(coordinates: List<List<Double>>) {
                     Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                     lifecycleScope.launch {
+                        val frame = arFragment.arSceneView.session?.update()
+                        if (frame != null) {
+                            if (frame.camera.trackingState != TrackingState.TRACKING) {
+                                Toast.makeText(applicationContext, "Not tracking", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+                        }
                         coordinates.forEachIndexed { index, coordinate ->
                             if (coordinate.size % 2 == 0) {
                                 val anchor = arFragment.arSceneView.session!!.createAnchor(
@@ -165,7 +177,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val frame = arFragment.arSceneView.session?.update()
         if (frame != null) {
             if (frame.camera.trackingState != TrackingState.TRACKING) {
-                Toast.makeText(MainActivity(), "Not tracking", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "Not tracking", Toast.LENGTH_SHORT).show()
                 return
             }
         }
