@@ -23,6 +23,7 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.ar.core.Pose
+import com.google.ar.core.TrackingState
 import com.google.ar.sceneform.AnchorNode
 import com.google.ar.sceneform.math.Vector3
 import com.google.ar.sceneform.rendering.ViewRenderable
@@ -30,6 +31,8 @@ import com.google.codelabs.findnearbyplacesar.ar.PlacesArFragment
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.ihsan.arcore_sceneform.api.ApiResponse
+import com.ihsan.arcore_sceneform.api.ApiService
 import com.ihsan.arcore_sceneform.ar.PlaceNode
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
@@ -45,7 +48,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private val TAG = "MainActivity"
 
-    //private lateinit var placesService: PlacesService
     private lateinit var arFragment: PlacesArFragment
 
     // Location
@@ -59,28 +61,69 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val orientationAngles = FloatArray(3)
 
     private var anchorNode: AnchorNode? = null
-    private var markers: MutableList<Marker> = emptyList<Marker>().toMutableList()
     private var currentLocation: Location? = null
-    //private lateinit var andyRenderable: ModelNode
 
     private lateinit var poiList: List<Poi>
-    private var placeRenderable: ViewRenderable? = null
-    private var textViewPlace: TextView? = null
+    private lateinit var apiService: ApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         arFragment = supportFragmentManager.findFragmentById(R.id.ar_fragment) as PlacesArFragment
+        arFragment.arSceneView.planeRenderer.isEnabled = false
 
         sensorManager = getSystemService()!!
         //placesService = PlacesService.create()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         getCurrentLocation {
-            val pos = CameraPosition.fromLatLngZoom(it.latLng, 13f)
-            Log.d(TAG, "entering setUpMaps $pos")
-            fetchPoi(it.latitude, it.longitude)
+            apiService= ApiService(it,object : ApiResponse {
+                override fun onResponse(response: String) {
+                    Log.d(TAG, "onResponse: $response")
+                }
+
+                override fun onError(error: String) {
+                    Log.d(TAG, "onError: $error")
+                }
+
+                override fun onLoading(isLoading: Boolean) {
+                    Log.d(TAG, "onLoading: $isLoading")
+                }
+
+                override fun onPoiResponse(poiList: List<Poi>) {
+                    Log.d(TAG, "onPoiResponse: $poiList")
+                    lifecycleScope.launch {
+                        makeAnchorNode(poiList)
+                    }
+                }
+
+                override fun onPoiDirectionResponse(coordinates: List<List<Double>>) {
+                    Log.d(TAG, "onPoiDirectionResponse: $coordinates")
+                    lifecycleScope.launch {
+                        coordinates.forEachIndexed { index, coordinate ->
+                            if (coordinate.size % 2 == 0) {
+                                val anchor = arFragment.arSceneView.session!!.createAnchor(
+                                    Pose.makeTranslation(
+                                        arFragment.arSceneView.arFrame!!.camera.pose.translation
+                                    )
+                                )
+                                val anchorNode = AnchorNode(anchor)
+                                anchorNode.setParent(arFragment.arSceneView.scene)
+
+                                val placeNode = PlaceNode(this@MainActivity, Poi("","routing",coordinate[0], coordinate[1], 0.0))
+                                placeNode.setParent(anchorNode)
+                                placeNode.localPosition = currentLocation?.let { it1 ->
+                                    Poi("","routing",coordinate[0], coordinate[1], 0.0).getPositionVector(
+                                        orientationAngles[0],
+                                        it1.latLng
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            })
         }
     }
 
@@ -107,50 +150,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
-    private fun fetchPoi(lat: Double, lng: Double, radius: Int = 5000){
-        val api = "037eff850f2e4b11b0ffacb5a381c7f2"
-
-        val url =
-            "https://api.geoapify.com/v2/places?categories=religion&filter=circle:$lng,$lat,$radius&bias=proximity:$lng,$lat&limit=20&apiKey=$api"
-        Log.d(TAG, "fetchPoi: $url")
-        val client = OkHttpClient()
-        val request = Request.Builder()
-            .url(url)
-            .build()
-
-        client.newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string()
-                    // Parse the response and cache the POIs
-                    poiList = parsePoiResponse(responseBody ?: "")
-                    Log.d(TAG, "onResponse: $poiList")
-                    // Now, you can use the poiList in your activity
-                    lifecycleScope.launch {
-                        makeAnchorNode(poiList)
-                        //setupArScene(poiList)
-                    }
-                    fetchPoiDirection(
-                        Coordinate(
-                            currentLocation!!.latitude,
-                            currentLocation!!.longitude
-                        ),
-                        Coordinate(
-                            poiList[0].latitude,
-                            poiList[0].longitude
-                        )
-                    )
-                    return
-                } else {
-                    Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
-                }
-            }
-
-            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                Log.e(TAG, "fetchPoi failed: ${e.message}")
-            }
-        })
-    }
     // Constants
     private val MAX_SCALE_FACTOR = 5.0f
     private fun calculateScaleFactor(distance: Double): Float {
@@ -163,6 +162,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
+        val frame = arFragment.arSceneView.session?.update()
+        if (frame != null) {
+            if (frame.camera.trackingState != TrackingState.TRACKING) {
+                Toast.makeText(MainActivity(), "Not tracking", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
         poiList.forEach {
             val anchor = arFragment.arSceneView.session!!.createAnchor(
                 Pose.makeTranslation(
@@ -198,104 +204,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     }
 
-    fun parsePoiResponse(jsonResponse: String): List<Poi> {
-        val poiList = mutableListOf<Poi>()
-
-        try {
-            val jsonObject = Gson().fromJson(jsonResponse, JsonObject::class.java)
-            val featuresArray: JsonArray? = jsonObject.getAsJsonArray("features")
-
-            featuresArray?.forEach { feature ->
-                val properties = feature?.asJsonObject?.getAsJsonObject("properties")
-                val geometry = feature?.asJsonObject?.getAsJsonObject("geometry")
-                val coordinates = geometry?.getAsJsonArray("coordinates")
-
-                val id = properties?.get("place_id")?.asString
-                val name = properties?.get("name")?.asString
-                val latitude = coordinates?.get(1)?.asDouble
-                val longitude = coordinates?.get(0)?.asDouble
-                val distance = properties?.get("distance")?.asDouble
-
-                if (name != null && latitude != null && longitude != null && distance != null && id != null) {
-                    val poi = Poi(id,name, latitude, longitude, distance)
-                    poiList.add(poi)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing POI response: ${e.message}")
-        }
-
-        return poiList
-    }
-
-    fun parsePoiDirectionResponse(jsonResponse: String): PoiDirectionResponse {
-        val gson = Gson()
-        return gson.fromJson(jsonResponse, PoiDirectionResponse::class.java)
-    }
-
-    private fun fetchPoiDirection(start: Coordinate, end: Coordinate) {
-        val api = "037eff850f2e4b11b0ffacb5a381c7f2"
-        Log.d(TAG, "fetchPoiDirection: $start ////// $end")
-
-        val url ="https://api.geoapify.com/v1/routing?waypoints=${start.lat},${start.lon}|${end.lat},${end.lon}&mode=walk&apiKey=$api"
-
-        Log.d(TAG, "fetchPoi: $url")
-        val client = OkHttpClient()
-        val request = Request.Builder()
-            .url(url)
-            .build()
-
-        client.newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string()
-                    Log.d(TAG, "fetchPoi direction response: $responseBody")
-
-                    // Parse the response using the new data classes
-                    try {
-                        val poiResponse = parsePoiDirectionResponse(responseBody ?: "")
-                        Log.d(TAG, "fetchPoi direction response: $poiResponse")
-                        val legs = poiResponse.features[0].properties.legs
-                        val coordinates = poiResponse.features.flatMap { it.geometry.coordinates.flatten() }
-
-                        // Now you can work with the legs and coordinates data
-                        lifecycleScope.launch {
-                            coordinates.forEachIndexed { index, coordinate ->
-                                if (coordinate.size % 2 == 0) {
-                                    val anchor = arFragment.arSceneView.session!!.createAnchor(
-                                        Pose.makeTranslation(
-                                            arFragment.arSceneView.arFrame!!.camera.pose.translation
-                                        )
-                                    )
-                                    val anchorNode = AnchorNode(anchor)
-                                    anchorNode.setParent(arFragment.arSceneView.scene)
-
-                                    val placeNode = PlaceNode(this@MainActivity, Poi("","routing",coordinate[0], coordinate[1], 0.0))
-                                    placeNode.setParent(anchorNode)
-                                    placeNode.localPosition = currentLocation?.let { it1 ->
-                                        Poi("","routing",coordinate[0], coordinate[1], 0.0).getPositionVector(
-                                            orientationAngles[0],
-                                            it1.latLng
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing POI response: ${e.message}")
-                    }
-
-                } else {
-                    Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
-                }
-            }
-
-            override fun onFailure(call: okhttp3.Call, e: IOException) {
-                Log.e(TAG, "fetchPoi failed: ${e.message}")
-            }
-        })
-    }
-
     private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
         if (ActivityCompat.checkSelfPermission(
                 this,
@@ -305,13 +213,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
             return
         }
         fusedLocationClient.lastLocation.addOnSuccessListener { location ->
