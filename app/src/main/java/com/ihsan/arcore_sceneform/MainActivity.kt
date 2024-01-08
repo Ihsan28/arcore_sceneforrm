@@ -11,7 +11,6 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Bundle
 import android.util.Log
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -19,30 +18,26 @@ import androidx.core.content.getSystemService
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.Marker
+import com.google.ar.core.Frame
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
 import com.google.ar.sceneform.AnchorNode
-import com.google.ar.sceneform.math.Vector3
-import com.google.ar.sceneform.rendering.ViewRenderable
 import com.google.codelabs.findnearbyplacesar.ar.PlacesArFragment
-import com.google.gson.Gson
-import com.google.gson.JsonArray
-import com.google.gson.JsonObject
 import com.ihsan.arcore_sceneform.api.ApiResponse
 import com.ihsan.arcore_sceneform.api.ApiService
 import com.ihsan.arcore_sceneform.ar.PlaceNode
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
-import com.ihsan.arcore_sceneform.models.PoiDirectionResponse
 import com.ihsan.arcore_sceneform.models.getPositionVector
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okio.IOException
-
+import java.lang.Math.toRadians
+import kotlin.math.asin
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
@@ -63,7 +58,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var anchorNode: AnchorNode? = null
     private var currentLocation: Location? = null
 
-    private lateinit var poiList: List<Poi>
     private lateinit var apiService: ApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,18 +66,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         arFragment = supportFragmentManager.findFragmentById(R.id.ar_fragment) as PlacesArFragment
         //arFragment.arSceneView.planeRenderer.isEnabled = false
-        arFragment.arSceneView.scene.addOnUpdateListener {
-            arFragment.onUpdate(it)
-        }
-        arFragment.arSceneView.scene.camera.nearClipPlane = 0.5f
-        arFragment.arSceneView.scene.camera.farClipPlane = 750f
+
+        arFragment.arSceneView.scene.camera.farClipPlane = 1000f
 
         sensorManager = getSystemService()!!
         //placesService = PlacesService.create()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         getCurrentLocation {
-            apiService= ApiService(it,object : ApiResponse {
+            apiService = ApiService(it, object : ApiResponse {
                 override fun onResponse(response: String) {
                     Log.d(TAG, "onResponse: $response")
                 }
@@ -103,36 +94,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     }
                 }
 
-                override fun onPoiDirectionResponse(coordinates: List<List<Double>>) {
+                override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
                     Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                     lifecycleScope.launch {
-                        val frame = arFragment.arSceneView.session?.update()
-                        if (frame != null) {
-                            if (frame.camera.trackingState != TrackingState.TRACKING) {
-                                Toast.makeText(applicationContext, "Not tracking", Toast.LENGTH_SHORT).show()
-                                return@launch
-                            }
-                        }
-                        coordinates.forEachIndexed { index, coordinate ->
-                            if (coordinate.size % 2 == 0) {
-                                val anchor = arFragment.arSceneView.session!!.createAnchor(
-                                    Pose.makeTranslation(
-                                        arFragment.arSceneView.arFrame!!.camera.pose.translation
-                                    )
-                                )
-                                val anchorNode = AnchorNode(anchor)
-                                anchorNode.setParent(arFragment.arSceneView.scene)
-
-                                val placeNode = PlaceNode(this@MainActivity, Poi("","routing",coordinate[0], coordinate[1], 0.0))
-                                placeNode.setParent(anchorNode)
-                                placeNode.localPosition = currentLocation?.let { it1 ->
-                                    Poi("","routing",coordinate[0], coordinate[1], 0.0).getPositionVector(
-                                        orientationAngles[0],
-                                        it1.latLng
-                                    )
-                                }
-                            }
-                        }
+                        makeAnchorNodeForPoiDirections(coordinates)
                     }
                 }
             })
@@ -165,7 +130,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // Constants
     private val MAX_SCALE_FACTOR = 5.0f
     private fun calculateScaleFactor(distance: Double): Float {
-        // Define a scaling factor based on your requirements
         // You can adjust this formula as needed
         val scaleFactor = 1.0f / distance.toFloat()
 
@@ -174,46 +138,114 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
-        val frame = arFragment.arSceneView.session?.update()
-        if (frame != null) {
-            if (frame.camera.trackingState != TrackingState.TRACKING) {
-                Toast.makeText(applicationContext, "Not tracking", Toast.LENGTH_SHORT).show()
-                return
-            }
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
         }
-        poiList.forEach {
-            val anchor = arFragment.arSceneView.session!!.createAnchor(
-                Pose.makeTranslation(
-                    it.latitude.toFloat(),
-                    it.longitude.toFloat(),
-                    arFragment.arSceneView.arFrame!!.camera.pose.translation.last()
-                )
+        poiList.forEach { poi ->
+            val (distance, bearing) = calculateDistanceAndBearing(
+                currentLocation!!.latitude,
+                currentLocation!!.longitude,
+                poi.latitude,
+                poi.longitude
             )
-            val distance = it.distance
-            anchorNode?.worldScale = Vector3.one()
-            anchorNode = AnchorNode(anchor)
-            anchorNode?.setParent(arFragment.arSceneView.scene)
-
-            // Calculate the scale factor based on distance
-            val scaleFactor = 1f
-
-            // Apply the scale factor to the anchorNode
-            anchorNode?.worldScale = Vector3(scaleFactor, scaleFactor, scaleFactor)
-
-            // Add the place in AR
-            val placeNode = PlaceNode(this@MainActivity, it)
-            placeNode.setParent(anchorNode)
-            placeNode.localPosition = currentLocation?.let { it1 ->
-                it.getPositionVector(
-                    orientationAngles[0],
-                    it1.latLng
-                )
+            arFragment.arSceneView.arFrame?.let { frame ->
+                val pose = translateToARCoreCoordinates(frame, distance, bearing)
+                pose?.let { validPose ->
+                    val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+                    anchorNode = AnchorNode(anchor).apply {
+                        setParent(arFragment.arSceneView.scene)
+                    }
+                    val scale = distance / 1000
+                    // Add the place in AR
+                    val placeNode = PlaceNode(this@MainActivity, poi)
+                    placeNode.localPosition = currentLocation.let { it1 ->
+                        poi.getPositionVector(
+                            orientationAngles[0], it1!!.latLng
+                        )
+                    }
+                    placeNode.setParent(anchorNode)
+                }
             }
         }
-//                            placeNode.setOnTapListener { _, _ ->
-//                                showInfoWindow(poi)
-//                            }
+    }
 
+    private fun makeAnchorNodeForPoiDirections(coordinate:List<Coordinate>){
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+        coordinate.forEach { poiPath ->
+            val (distance, bearing) = calculateDistanceAndBearing(
+                currentLocation!!.latitude,
+                currentLocation!!.longitude,
+                poiPath.lat,
+                poiPath.lon
+            )
+            arFragment.arSceneView.arFrame?.let { frame ->
+                val pose = translateToARCoreCoordinates(frame, distance, bearing)
+                pose?.let { validPose ->
+                    val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+                    anchorNode = AnchorNode(anchor).apply {
+                        setParent(arFragment.arSceneView.scene)
+                    }
+                    val scale = distance / 1000
+                    val poi = Poi("","routing",poiPath.lat,poiPath.lon,0.0)
+                    // Add the place in AR
+                    val placeNode = PlaceNode(this@MainActivity, poi)
+                    placeNode.localPosition = currentLocation.let { it1 ->
+                        poi.getPositionVector(
+                            orientationAngles[0], it1!!.latLng
+                        )
+                    }
+                    placeNode.setParent(anchorNode)
+                }
+            }
+        }
+    }
+
+    val kilometerToMeter = 1000
+    private fun translateToARCoreCoordinates(
+        frame: Frame, distance: Double, bearing: Double
+    ): Pose? {
+        if (frame.camera.trackingState != TrackingState.TRACKING) {
+            return null // Camera not tracking
+        }
+
+        val cameraPose = frame.camera.pose
+
+        val x = distance * cos(toRadians(bearing))
+        val y = distance * sin(toRadians(bearing))
+        val z = distance
+
+        val anchorPose = Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
+        anchorPose.compose(cameraPose)
+
+        return anchorPose
+    }
+
+    private fun calculateDistanceAndBearing(
+        userLat: Double, userLon: Double, poiLat: Double, poiLon: Double
+    ): Pair<Double, Double> {
+        val lat1 = toRadians(userLat)
+        val lon1 = toRadians(userLon)
+        val lat2 = toRadians(poiLat)
+        val lon2 = toRadians(poiLon)
+
+        val dLat = lat2 - lat1
+        val dLon = lon2 - lon1
+
+        val a = sin(dLat / 2).pow(2) + cos(lat1) * cos(lat2) * sin(dLon / 2).pow(2)
+        val c = 2 * asin(sqrt(a))
+        val distance = 6371.0 * c// Earth's radius in kilometers
+        val distanceInMeters = distance*kilometerToMeter// multiply by 1000
+
+        val y = sin(dLon) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        val bearing = Math.toDegrees(atan2(y, x))
+        Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
+
+        return Pair(distanceInMeters, bearing)
     }
 
     private fun getCurrentLocation(onSuccess: (Location) -> Unit) {

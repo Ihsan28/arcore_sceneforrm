@@ -125,6 +125,7 @@ class ApiService(val currentLocation:Location,val apiResponse: ApiResponse) {
                         val legs = poiResponse.features[0].properties.legs
                         val coordinates =
                             poiResponse.features.flatMap { it.geometry.coordinates.flatten() }
+                                .map { Coordinate(it[1], it[0]) }
 
                         apiResponse.onPoiDirectionResponse(coordinates)
 
