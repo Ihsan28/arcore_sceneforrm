@@ -97,7 +97,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
                     Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                     lifecycleScope.launch {
-                        makeAnchorNodeForPoiDirections(coordinates)
+                        //makeAnchorNodeForPoiDirections(coordinates)
                     }
                 }
             })
@@ -204,22 +204,22 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    val kilometerToMeter = 1000
+    val kilometerToMeter = 2
     private fun translateToARCoreCoordinates(
         frame: Frame, distance: Double, bearing: Double
-    ): Pose? {
-        if (frame.camera.trackingState != TrackingState.TRACKING) {
+    ): Pose {
+        /*if (frame.camera.trackingState != TrackingState.TRACKING) {
             return null // Camera not tracking
-        }
+        }*/
 
         val cameraPose = frame.camera.pose
 
         val x = distance * cos(toRadians(bearing))
         val y = distance * sin(toRadians(bearing))
-        val z = distance
+        val z = cameraPose.translation.last()
 
         val anchorPose = Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
-        anchorPose.compose(cameraPose)
+        //anchorPose.compose(cameraPose)
 
         return anchorPose
     }
