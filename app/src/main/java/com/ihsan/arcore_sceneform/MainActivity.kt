@@ -21,11 +21,13 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import com.google.ar.core.Frame
 import com.google.ar.core.Pose
-import com.google.ar.core.TrackingState
 import com.google.ar.sceneform.AnchorNode
+import com.google.ar.sceneform.math.Vector3
+import com.google.ar.sceneform.ux.TransformableNode
 import com.google.codelabs.findnearbyplacesar.ar.PlacesArFragment
 import com.ihsan.arcore_sceneform.api.ApiResponse
 import com.ihsan.arcore_sceneform.api.ApiService
+import com.ihsan.arcore_sceneform.ar.PathNode
 import com.ihsan.arcore_sceneform.ar.PlaceNode
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
@@ -90,14 +92,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 override fun onPoiResponse(poiList: List<Poi>) {
                     Log.d(TAG, "onPoiResponse: $poiList")
                     lifecycleScope.launch {
-                        makeAnchorNode(poiList)
+                        //makeAnchorNode(poiList)
                     }
                 }
 
                 override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
                     Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                     lifecycleScope.launch {
-                        //makeAnchorNodeForPoiDirections(coordinates)
+                        makeAnchorNodeForPoiDirections(coordinates)
                     }
                 }
             })
@@ -129,12 +131,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     // Constants
     private val MAX_SCALE_FACTOR = 5.0f
-    private fun calculateScaleFactor(distance: Double): Float {
+    private fun calculateScaleFactor1(distance: Double): Float {
         // You can adjust this formula as needed
         val scaleFactor = 1.0f / distance.toFloat()
 
         // Ensure a minimum scale to prevent the node from becoming too large
         return scaleFactor.coerceAtMost(MAX_SCALE_FACTOR)
+    }
+
+    private fun calculateScaleFactor(distance: Double): Float {
+        val minDistance = 100.0 // Minimum distance for base scale
+        val maxDistance = 5000.0 // Maximum distance (5 km)
+
+        val baseScale = 5.0f // Scale at minDistance
+        val minScale = 0.5f // Scale at maxDistance
+
+        // Linear scaling formula
+        val scaleFactor = if (distance < minDistance) {
+            baseScale
+        } else {
+            // Scale down as distance increases
+            val scale = baseScale - ((distance - minDistance) / (maxDistance - minDistance)) * (baseScale - minScale)
+            scale.coerceAtLeast(minScale.toDouble()).toFloat()
+        }
+
+        return scaleFactor
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
@@ -151,7 +172,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             )
             arFragment.arSceneView.arFrame?.let { frame ->
                 val pose = translateToARCoreCoordinates(frame, distance, bearing)
-                pose?.let { validPose ->
+                pose.let { validPose ->
                     val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
                     anchorNode = AnchorNode(anchor).apply {
                         setParent(arFragment.arSceneView.scene)
@@ -175,7 +196,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
             return
         }
+        var i = 0
         coordinate.forEach { poiPath ->
+            Log.d(TAG, "makeAnchorNodeForPoiDirections: Path ${++i} coordinates")
             val (distance, bearing) = calculateDistanceAndBearing(
                 currentLocation!!.latitude,
                 currentLocation!!.longitude,
@@ -184,27 +207,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             )
             arFragment.arSceneView.arFrame?.let { frame ->
                 val pose = translateToARCoreCoordinates(frame, distance, bearing)
-                pose?.let { validPose ->
+                pose.let { validPose ->
                     val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
                     anchorNode = AnchorNode(anchor).apply {
                         setParent(arFragment.arSceneView.scene)
                     }
-                    val scale = distance / 1000
                     val poi = Poi("","routing",poiPath.lat,poiPath.lon,0.0)
+
                     // Add the place in AR
-                    val placeNode = PlaceNode(this@MainActivity, poi)
-                    placeNode.localPosition = currentLocation.let { it1 ->
+                    val pathNode = PathNode(this@MainActivity, poi)
+                    val positionVector = currentLocation.let { it1 ->
                         poi.getPositionVector(
                             orientationAngles[0], it1!!.latLng
                         )
                     }
-                    placeNode.setParent(anchorNode)
+                    Log.d(TAG, "makeAnchorNodeForPoiDirections: positionVector $positionVector")
+                    pathNode.worldPosition = positionVector
+
+                    // Apply scaling based on distance
+                    /*val scaleFactor = calculateScaleFactor(distance)
+                    pathNode.localScale = Vector3(scaleFactor, scaleFactor, scaleFactor)*/
+
+                    val andyRenderable = pathNode.modelRenderable
+                    val andy = TransformableNode(arFragment.getTransformationSystem())
+                    andy.setParent(anchorNode)
+                    andy.renderable = andyRenderable
+                    andy.select()
+                    pathNode.setParent(anchorNode)
                 }
             }
         }
     }
 
-    val kilometerToMeter = 2
+    val kilometerToMeter = 20
     private fun translateToARCoreCoordinates(
         frame: Frame, distance: Double, bearing: Double
     ): Pose {
@@ -215,13 +250,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cameraPose = frame.camera.pose
 
         val x = distance * cos(toRadians(bearing))
-        val y = distance * sin(toRadians(bearing))
-        val z = cameraPose.translation.last()
-
-        val anchorPose = Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
+        val y = .5f
+        val z = distance * sin(toRadians(bearing))
+        Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
         //anchorPose.compose(cameraPose)
 
-        return anchorPose
+        return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
     }
 
     private fun calculateDistanceAndBearing(
