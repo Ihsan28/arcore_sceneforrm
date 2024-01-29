@@ -247,7 +247,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    val kilometerToMeter = 20
+    private val kilometerToMeter = 5
     private fun translateToARCoreCoordinates(
         distance: Double, bearing: Double
     ): Pose {
