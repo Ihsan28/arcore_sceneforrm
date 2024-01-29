@@ -7,13 +7,12 @@ import android.widget.TextView
 import com.google.ar.sceneform.Node
 import com.google.ar.sceneform.rendering.ViewRenderable
 import com.ihsan.arcore_sceneform.R
-import com.ihsan.arcore_sceneform.models.Poi
 
 
 private const val TAG = "PlaceNode"
 class PlaceNode(
     val context: Context,
-    val place: Poi?
+    val placeName: String?
 ) : Node() {
 
     private var placeRenderable: ViewRenderable? = null
@@ -37,10 +36,10 @@ class PlaceNode(
                 setRenderable(renderable)
                 placeRenderable = renderable
 
-                place?.let {
+                placeName?.let {
                     textViewPlace = renderable.view.findViewById(R.id.placeName)
-                    textViewPlace?.text = it.name
-                    Log.d(TAG, "onActivate: ${it.name}")
+                    textViewPlace?.text = it
+                    Log.d(TAG, "onActivate: ${it}")
                     showInfoWindow()
                 }
             }

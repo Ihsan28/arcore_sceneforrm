@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -168,11 +169,35 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return scaleFactor
     }
 
+    private fun placeAnchorNodeForNorth() {
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+        val pose = translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(getTrueNorth(),0.0))
+
+        pose.let { validPose ->
+            val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+            anchorNode = AnchorNode(anchor).apply {
+                setParent(arFragment.arSceneView.scene)
+            }
+            // Add the place in AR
+            val placeNode = PlaceNode(this@MainActivity, "World North")
+
+            placeNode.setParent(anchorNode)
+
+            Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
+        }
+
+
+    }
+
     private fun makeAnchorNode(poiList: List<Poi>) {
         if (currentLocation == null) {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
             return
         }
+        placeAnchorNodeForNorth()
         poiList.forEach { poi ->
             val (distance, bearing) = calculateDistanceAndBearing(
                 currentLocation!!.latitude,
@@ -188,7 +213,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     setParent(arFragment.arSceneView.scene)
                 }
                 // Add the place in AR
-                val placeNode = PlaceNode(this@MainActivity, poi)
+                val placeNode = PlaceNode(this@MainActivity, poi.name)
                 placeNode.localPosition = currentLocation.let { it1 ->
                     poi.getPositionVector(
                         orientationAngles[0], it1!!.latLng
@@ -247,7 +272,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private val kilometerToMeter = 5
+    private val kilometerToMeter = 3
     private fun translateToARCoreCoordinates(
         distance: Double, bearing: Double
     ): Pose {
@@ -259,6 +284,45 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         //anchorPose.compose(cameraPose)
 
         return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
+    }
+
+    //use sensor to get true north and calibrate bearing
+    private fun getTrueNorth(): Double {
+        val rotationMatrix = FloatArray(9)
+        SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+        val orientationAngles = FloatArray(3)
+        SensorManager.getOrientation(rotationMatrix, orientationAngles)
+        val azimuthInRadians = orientationAngles[0]
+        val azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble())
+
+        // Calculate magnetic declination
+        val geomagneticField = GeomagneticField(
+            currentLocation!!.latitude.toFloat(),
+            currentLocation!!.longitude.toFloat(),
+            currentLocation!!.altitude.toFloat(),
+            System.currentTimeMillis()
+        )
+        val declination = geomagneticField.declination.toDouble()
+
+        // Adjust azimuth with magnetic declination
+        val trueNorthAzimuth = azimuthInDegrees + declination
+
+        //round to 2 decimal places
+        val trueNorthAzimuthRounded = (trueNorthAzimuth * 1000).toInt() / 1000.0
+        Log.d(TAG, "getTrueNorth: $trueNorthAzimuthRounded")
+        return trueNorthAzimuthRounded
+    }
+
+    //calibrate bearing to real world north
+    fun calibrateBearingToWorldNorth(trueNorth:Double,bearing: Double): Double {
+        var bearingToTrueNorth = bearing - trueNorth
+        // Adjust for negative values
+        if (bearingToTrueNorth < 0) {
+            bearingToTrueNorth += 360.0
+        }
+
+        Log.d(TAG, "bearing: $bearing calibrateBearingToWorldNorth: $bearingToTrueNorth")
+        return bearingToTrueNorth
     }
 
     // https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
@@ -283,7 +347,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val y = sin(dLon) * cos(lat2)
         val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        val bearing = Math.toDegrees(atan2(y, x))
+        val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
+        val bearing = calibrateBearingToWorldNorth(getTrueNorth(),bearingFromTrueNorth)
+
+        //get true north and calculate bearing
         Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
 
         return Pair(distanceInMeters, bearing)
