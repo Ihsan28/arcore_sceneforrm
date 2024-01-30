@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
-import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -20,6 +19,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
+import com.google.ar.core.Config
 import com.google.ar.core.Pose
 import com.google.ar.sceneform.AnchorNode
 import com.google.ar.sceneform.ux.TransformableNode
@@ -70,15 +70,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             it.planeDiscoveryController.hide()
             it.planeDiscoveryController.setInstructionView(null)
             it.arSceneView.planeRenderer.isEnabled = false
+            it.arSceneView.session.let { session ->
+                session?.configure(session.config?.apply {
+                    planeFindingMode = Config.PlaneFindingMode.DISABLED
+                    updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                    lightEstimationMode = Config.LightEstimationMode.DISABLED
+                    focusMode = Config.FocusMode.AUTO
+
+                    onTrackballEvent(null)
+                })
+            }
             it.arSceneView.scene.camera.nearClipPlane = 0.1f
             it.arSceneView.scene.camera.farClipPlane = 5000f
-            it.arSceneView.scene.setOnTouchListener { hitTestResult, motionEvent ->
-                if (hitTestResult.node != null) {
-                    Log.d(TAG, "onCreate: ${hitTestResult.node}")
-
-                }
-                true
-            }
         }
 
         sensorManager = getSystemService()!!
@@ -120,16 +123,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onResume()
         sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.also {
             sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_NORMAL
+                this, it, SensorManager.SENSOR_DELAY_NORMAL
             )
         }
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also {
             sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_NORMAL
+                this, it, SensorManager.SENSOR_DELAY_NORMAL
             )
         }
     }
@@ -174,7 +173,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
             return
         }
-        val pose = translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(getTrueNorth(),0.0))
+        val pose =
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(getTrueNorth(), 0.0))
 
         pose.let { validPose ->
             val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
@@ -188,8 +188,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
         }
-
-
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
@@ -200,10 +198,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         placeAnchorNodeForNorth()
         poiList.forEach { poi ->
             val (distance, bearing) = calculateDistanceAndBearing(
-                currentLocation!!.latitude,
-                currentLocation!!.longitude,
-                poi.latitude,
-                poi.longitude
+                currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
             )
 
             val pose = translateToARCoreCoordinates(distance, bearing)
@@ -233,10 +228,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         coordinate.forEach { poiPath ->
             Log.d(TAG, "makeAnchorNodeForPoiDirections: Path ${++i} coordinates")
             val (distance, bearing) = calculateDistanceAndBearing(
-                currentLocation!!.latitude,
-                currentLocation!!.longitude,
-                poiPath.lat,
-                poiPath.lon
+                currentLocation!!.latitude, currentLocation!!.longitude, poiPath.lat, poiPath.lon
             )
 
             val pose = translateToARCoreCoordinates(distance, bearing)
@@ -289,33 +281,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     //use sensor to get true north and calibrate bearing
     private fun getTrueNorth(): Double {
         val rotationMatrix = FloatArray(9)
-        SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+        SensorManager.getRotationMatrix(
+            rotationMatrix, null, accelerometerReading, magnetometerReading
+        )
         val orientationAngles = FloatArray(3)
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
         val azimuthInRadians = orientationAngles[0]
         val azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble())
 
-        // Calculate magnetic declination
-        val geomagneticField = GeomagneticField(
-            currentLocation!!.latitude.toFloat(),
-            currentLocation!!.longitude.toFloat(),
-            currentLocation!!.altitude.toFloat(),
-            System.currentTimeMillis()
-        )
-        val declination = geomagneticField.declination.toDouble()
-
-        // Adjust azimuth with magnetic declination
-        val trueNorthAzimuth = azimuthInDegrees + declination
-
         //round to 2 decimal places
-        val trueNorthAzimuthRounded = (trueNorthAzimuth * 1000).toInt() / 1000.0
+        val trueNorthAzimuthRounded = (azimuthInDegrees * 1000).toInt() / 1000.0
         Log.d(TAG, "getTrueNorth: $trueNorthAzimuthRounded")
         return trueNorthAzimuthRounded
     }
 
     //calibrate bearing to real world north
-    fun calibrateBearingToWorldNorth(trueNorth:Double,bearing: Double): Double {
-        var bearingToTrueNorth = bearing - trueNorth
+    private fun calibrateBearingToWorldNorth(trueNorth: Double, bearing: Double): Double {
+        var bearingToTrueNorth = bearing - trueNorth - 90.0
         // Adjust for negative values
         if (bearingToTrueNorth < 0) {
             bearingToTrueNorth += 360.0
@@ -348,7 +330,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val y = sin(dLon) * cos(lat2)
         val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
         val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
-        val bearing = calibrateBearingToWorldNorth(getTrueNorth(),bearingFromTrueNorth)
+        val bearing = calibrateBearingToWorldNorth(getTrueNorth(), bearingFromTrueNorth)
 
         //get true north and calculate bearing
         Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
@@ -358,11 +340,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
         if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
+                this, Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
+                this, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             return
@@ -403,10 +383,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         // Update rotation matrix, which is needed to update orientation angles.
         SensorManager.getRotationMatrix(
-            rotationMatrix,
-            null,
-            accelerometerReading,
-            magnetometerReading
+            rotationMatrix, null, accelerometerReading, magnetometerReading
         )
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
     }
