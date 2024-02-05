@@ -11,6 +11,8 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Bundle
 import android.util.Log
+import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -45,6 +47,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val TAG = "MainActivity"
 
     private lateinit var arFragment: PlacesArFragment
+    private lateinit var compassView:ImageView
+    private lateinit var azimuthView: TextView
 
     // Location
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -58,6 +62,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private var anchorNode: AnchorNode? = null
     private var currentLocation: Location? = null
+    private var azimuthInDegrees = 0.0
 
     private lateinit var apiService: ApiService
 
@@ -66,12 +71,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         setContentView(R.layout.activity_main)
 
         arFragment = supportFragmentManager.findFragmentById(R.id.ar_fragment) as PlacesArFragment
+        compassView = findViewById(R.id.compass_view)
+        azimuthView = findViewById(R.id.azimuth)
+
         arFragment.let {
-            it.planeDiscoveryController.hide()
-            it.planeDiscoveryController.setInstructionView(null)
             it.arSceneView.planeRenderer.isEnabled = false
             it.arSceneView.session.let { session ->
-                session?.configure(session.config?.apply {
+                session?.configure(session.config.apply {
+
                     planeFindingMode = Config.PlaneFindingMode.DISABLED
                     updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                     lightEstimationMode = Config.LightEstimationMode.DISABLED
@@ -103,9 +110,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
 
                 override fun onPoiResponse(poiList: List<Poi>) {
-                    Log.d(TAG, "onPoiResponse: $poiList")
+                    Log.d(TAG, "onPoiResponse: ${poiList.size}")
                     lifecycleScope.launch {
-                        makeAnchorNode(poiList)
+                        placeAnchorNodeForNorth()
+                        //makeAnchorNode(poiList)
                     }
                 }
 
@@ -138,6 +146,244 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
+    private fun placeAnchorNodeForNorth() {
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+        val poseListSorrooundings = listOf(
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180.0)),
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(270.0)),
+            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(360.0))
+        )
+
+        var i= 0
+            poseListSorrooundings.map { validPose ->
+            val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+            anchorNode = AnchorNode(anchor).apply {
+                parent = arFragment.arSceneView.scene
+            }
+                val listName = listOf("North", "East", "South", "West")
+                val name:String = when (i) {
+                    0 -> {
+                        i++
+                        "North"
+                    }
+                    1 -> {
+                        i++
+                        "East"
+                    }
+                    2 -> {
+                        i++
+                        "South"
+                    }
+                    else -> {
+                        i=0
+                        "West"
+                    }
+                }
+            // Add the place in AR
+            val placeNode = PlaceNode(this@MainActivity, name)
+
+            placeNode.parent = anchorNode
+
+            Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun makeAnchorNode(poiList: List<Poi>) {
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+
+        poiList.forEach { poi ->
+            val (distance, bearing) = calculateDistanceAndBearing(
+                currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
+            )
+
+            val pose = translateToARCoreCoordinates(distance, bearing)
+            pose.let { validPose ->
+                val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+                anchorNode = AnchorNode(anchor).apply {
+                    parent = arFragment.arSceneView.scene
+                }
+                // Add the place in AR
+                val placeNode = PlaceNode(this@MainActivity, poi.name)
+                placeNode.localPosition = currentLocation.let { it1 ->
+                    poi.getPositionVector(
+                        orientationAngles[0], it1!!.latLng
+                    )
+                }
+                placeNode.parent = anchorNode
+            }
+        }
+    }
+
+    private fun makeAnchorNodeForPoiDirections(coordinate: List<Coordinate>) {
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+        var i = 0
+        coordinate.forEach { poiPath ->
+            Log.d(TAG, "makeAnchorNodeForPoiDirections: Path ${++i} coordinates")
+            val (distance, bearing) = calculateDistanceAndBearing(
+                currentLocation!!.latitude, currentLocation!!.longitude, poiPath.lat, poiPath.lon
+            )
+
+            val pose = translateToARCoreCoordinates(distance, bearing)
+            pose.let { validPose ->
+                val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
+                anchorNode = AnchorNode(anchor).apply {
+                    parent = arFragment.arSceneView.scene
+                }
+                val poi = Poi("", "routing", poiPath.lat, poiPath.lon, 0.0)
+
+                // Add the place in AR
+                val pathNode = PathNode(this@MainActivity, poi)
+                val positionVector = currentLocation.let { it1 ->
+                    poi.getPositionVector(
+                        orientationAngles[0], it1!!.latLng
+                    )
+                }
+                Log.d(TAG, "makeAnchorNodeForPoiDirections: positionVector $positionVector")
+                pathNode.worldPosition = positionVector
+
+                // Apply scaling based on distance
+                /*val scaleFactor = calculateScaleFactor(distance)
+                pathNode.localScale = Vector3(scaleFactor, scaleFactor, scaleFactor)*/
+
+                val andyRenderable = pathNode.modelRenderable
+                val andy = TransformableNode(arFragment.getTransformationSystem())
+                andy.parent = anchorNode
+                andy.renderable = andyRenderable
+                andy.select()
+                pathNode.parent = anchorNode
+            }
+        }
+    }
+
+    private val kilometerToMeter = 3
+    private fun translateToARCoreCoordinates(
+        distance: Double, bearing: Double
+    ): Pose {
+
+        val x = distance * cos(toRadians(bearing))
+        val y = .4f
+        val z = distance * sin(toRadians(bearing))
+        Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
+        //anchorPose.compose(cameraPose)
+
+        return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
+    }
+
+    //use sensor to get true north and calibrate bearing
+    private fun getTrueNorth(): Double {
+        //round to 3 decimal places
+        return (azimuthInDegrees * 1000).toInt() / 1000.0
+    }
+
+    //calibrate bearing to real world north
+    private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
+//        var bearingToTrueNorth = bearing - trueNorth - 90.0
+        var bearingToTrueNorth = bearing-trueNorth-90.0
+        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 90.0 = ($bearingToTrueNorth)")
+        return bearingToTrueNorth
+    }
+
+    // https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
+    private fun calculateDistanceAndBearing(
+        userLat: Double, userLon: Double, poiLat: Double, poiLon: Double
+    ): Pair<Double, Double> {
+        //user lat lon
+        val lat1 = toRadians(userLat)
+        val lon1 = toRadians(userLon)
+        //poi lat lon
+        val lat2 = toRadians(poiLat)
+        val lon2 = toRadians(poiLon)
+        //delta lat lon
+        val dLat = lat2 - lat1
+        val dLon = lon2 - lon1
+
+        //haversine formula
+        val a = sin(dLat / 2).pow(2) + cos(lat1) * cos(lat2) * sin(dLon / 2).pow(2)
+        val c = 2 * asin(sqrt(a))
+        val distance = 6371.0 * c// Earth's radius in kilometers
+        val distanceInMeters = distance * kilometerToMeter// multiply by 1000
+
+        val y = sin(dLon) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
+        //calibrate bearing to real world north
+        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
+
+        //get true north and calculate bearing
+        Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
+
+        return Pair(distanceInMeters, bearing)
+    }
+
+    private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
+        if (ActivityCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            currentLocation = location
+            onSuccess(location)
+            Log.d(TAG, "getlocation: CurrentLocation ${location.latitude} ${location.longitude}")
+        }.addOnFailureListener {
+            Log.e(TAG, "Could not get location")
+        }
+    }
+
+    private fun isSupportedDevice(): Boolean {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val openGlVersionString = activityManager.deviceConfigurationInfo.glEsVersion
+        if (openGlVersionString.toDouble() < 3.0) {
+            Toast.makeText(this, "Sceneform requires OpenGL ES 3.0 or later", Toast.LENGTH_LONG)
+                .show()
+            finish()
+            return false
+        }
+        return true
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        //Log.d(TAG, "onAccuracyChanged: $sensor, $accuracy")
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null) {
+            return
+        }
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
+            //Log.d(TAG, "Accelerometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
+        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
+            //Log.d(TAG, "Magnetometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
+        }
+
+        // Update rotation matrix, which is needed to update orientation angles.
+        SensorManager.getRotationMatrix(
+            rotationMatrix, null, accelerometerReading, magnetometerReading
+        )
+        SensorManager.getOrientation(rotationMatrix, orientationAngles)
+
+        azimuthInDegrees = Math.toDegrees(orientationAngles[0].toDouble())*1000/1000.0
+        compassView.rotation = -azimuthInDegrees.toFloat()
+
+        azimuthView.text = "azimuth: $azimuthInDegrees"
+    }
+
     // Constants
     private val MAX_SCALE_FACTOR = 5.0f
     private fun calculateScaleFactor1(distance: Double): Float {
@@ -168,226 +414,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return scaleFactor
     }
 
-    private fun placeAnchorNodeForNorth() {
-        if (currentLocation == null) {
-            Log.e(TAG, "makeAnchorNode: currentLocation is null")
-            return
-        }
-        val pose =
-            translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(getTrueNorth(), 0.0))
-
-        pose.let { validPose ->
-            val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
-            anchorNode = AnchorNode(anchor).apply {
-                setParent(arFragment.arSceneView.scene)
-            }
-            // Add the place in AR
-            val placeNode = PlaceNode(this@MainActivity, "World North")
-
-            placeNode.setParent(anchorNode)
-
-            Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun makeAnchorNode(poiList: List<Poi>) {
-        if (currentLocation == null) {
-            Log.e(TAG, "makeAnchorNode: currentLocation is null")
-            return
-        }
-        placeAnchorNodeForNorth()
-        poiList.forEach { poi ->
-            val (distance, bearing) = calculateDistanceAndBearing(
-                currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
-            )
-
-            val pose = translateToARCoreCoordinates(distance, bearing)
-            pose.let { validPose ->
-                val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
-                anchorNode = AnchorNode(anchor).apply {
-                    setParent(arFragment.arSceneView.scene)
-                }
-                // Add the place in AR
-                val placeNode = PlaceNode(this@MainActivity, poi.name)
-                placeNode.localPosition = currentLocation.let { it1 ->
-                    poi.getPositionVector(
-                        orientationAngles[0], it1!!.latLng
-                    )
-                }
-                placeNode.setParent(anchorNode)
-            }
-        }
-    }
-
-    private fun makeAnchorNodeForPoiDirections(coordinate: List<Coordinate>) {
-        if (currentLocation == null) {
-            Log.e(TAG, "makeAnchorNode: currentLocation is null")
-            return
-        }
-        var i = 0
-        coordinate.forEach { poiPath ->
-            Log.d(TAG, "makeAnchorNodeForPoiDirections: Path ${++i} coordinates")
-            val (distance, bearing) = calculateDistanceAndBearing(
-                currentLocation!!.latitude, currentLocation!!.longitude, poiPath.lat, poiPath.lon
-            )
-
-            val pose = translateToARCoreCoordinates(distance, bearing)
-            pose.let { validPose ->
-                val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
-                anchorNode = AnchorNode(anchor).apply {
-                    setParent(arFragment.arSceneView.scene)
-                }
-                val poi = Poi("", "routing", poiPath.lat, poiPath.lon, 0.0)
-
-                // Add the place in AR
-                val pathNode = PathNode(this@MainActivity, poi)
-                val positionVector = currentLocation.let { it1 ->
-                    poi.getPositionVector(
-                        orientationAngles[0], it1!!.latLng
-                    )
-                }
-                Log.d(TAG, "makeAnchorNodeForPoiDirections: positionVector $positionVector")
-                pathNode.worldPosition = positionVector
-
-                // Apply scaling based on distance
-                /*val scaleFactor = calculateScaleFactor(distance)
-                pathNode.localScale = Vector3(scaleFactor, scaleFactor, scaleFactor)*/
-
-                val andyRenderable = pathNode.modelRenderable
-                val andy = TransformableNode(arFragment.getTransformationSystem())
-                andy.setParent(anchorNode)
-                andy.renderable = andyRenderable
-                andy.select()
-                pathNode.setParent(anchorNode)
-            }
-
-        }
-    }
-
-    private val kilometerToMeter = 3
-    private fun translateToARCoreCoordinates(
-        distance: Double, bearing: Double
-    ): Pose {
-
-        val x = distance * cos(toRadians(bearing))
-        val y = .5f
-        val z = distance * sin(toRadians(bearing))
-        Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
-        //anchorPose.compose(cameraPose)
-
-        return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
-    }
-
-    //use sensor to get true north and calibrate bearing
-    private fun getTrueNorth(): Double {
-        val rotationMatrix = FloatArray(9)
-        SensorManager.getRotationMatrix(
-            rotationMatrix, null, accelerometerReading, magnetometerReading
-        )
-        val orientationAngles = FloatArray(3)
-        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-        val azimuthInRadians = orientationAngles[0]
-        val azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble())
-
-        //round to 2 decimal places
-        val trueNorthAzimuthRounded = (azimuthInDegrees * 1000).toInt() / 1000.0
-        Log.d(TAG, "getTrueNorth: $trueNorthAzimuthRounded")
-        return trueNorthAzimuthRounded
-    }
-
-    //calibrate bearing to real world north
-    private fun calibrateBearingToWorldNorth(trueNorth: Double, bearing: Double): Double {
-        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        // Adjust for negative values
-        if (bearingToTrueNorth < 0) {
-            bearingToTrueNorth += 360.0
-        }
-
-        Log.d(TAG, "bearing: $bearing calibrateBearingToWorldNorth: $bearingToTrueNorth")
-        return bearingToTrueNorth
-    }
-
-    // https://stackoverflow.com/questions/639695/how-to-convert-latitude-or-longitude-to-meters
-    private fun calculateDistanceAndBearing(
-        userLat: Double, userLon: Double, poiLat: Double, poiLon: Double
-    ): Pair<Double, Double> {
-        //user lat lon
-        val lat1 = toRadians(userLat)
-        val lon1 = toRadians(userLon)
-        //poi lat lon
-        val lat2 = toRadians(poiLat)
-        val lon2 = toRadians(poiLon)
-        //delta lat lon
-        val dLat = lat2 - lat1
-        val dLon = lon2 - lon1
-
-        //haversine formula
-        val a = sin(dLat / 2).pow(2) + cos(lat1) * cos(lat2) * sin(dLon / 2).pow(2)
-        val c = 2 * asin(sqrt(a))
-        val distance = 6371.0 * c// Earth's radius in kilometers
-        val distanceInMeters = distance * kilometerToMeter// multiply by 1000
-
-        val y = sin(dLon) * cos(lat2)
-        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
-        val bearing = calibrateBearingToWorldNorth(getTrueNorth(), bearingFromTrueNorth)
-
-        //get true north and calculate bearing
-        Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
-
-        return Pair(distanceInMeters, bearing)
-    }
-
-    private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-            currentLocation = location
-            onSuccess(location)
-            Log.d(TAG, "getlocation ${location.latitude} ${location.longitude}")
-        }.addOnFailureListener {
-            Log.e(TAG, "Could not get location")
-        }
-    }
-
-    private fun isSupportedDevice(): Boolean {
-        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val openGlVersionString = activityManager.deviceConfigurationInfo.glEsVersion
-        if (openGlVersionString.toDouble() < 3.0) {
-            Toast.makeText(this, "Sceneform requires OpenGL ES 3.0 or later", Toast.LENGTH_LONG)
-                .show()
-            finish()
-            return false
-        }
-        return true
-    }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-    }
-
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null) {
-            return
-        }
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
-        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
-        }
-
-        // Update rotation matrix, which is needed to update orientation angles.
-        SensorManager.getRotationMatrix(
-            rotationMatrix, null, accelerometerReading, magnetometerReading
-        )
-        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-    }
-}
+}//MainActivity
 
 val Location.latLng: LatLng
     get() = LatLng(this.latitude, this.longitude)

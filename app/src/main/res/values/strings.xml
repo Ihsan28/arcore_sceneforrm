@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">arcore_sceneform</string>
     <string name="google_maps_key">AIzaSyCWh9QOCvpxZdDukjV5amAs6TQxYkptJEM</string>
+    <string name="comapass_view">Comapass view</string>
 </resources>
