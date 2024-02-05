@@ -272,9 +272,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         distance: Double, bearing: Double
     ): Pose {
 
-        val x = distance * cos(toRadians(bearing))
+//        val x = distance * cos(toRadians(bearing))
+//        val y = .4f
+//        val z = distance * sin(toRadians(bearing))
+
+        val x = distance * sin(toRadians(bearing))
         val y = .4f
-        val z = distance * sin(toRadians(bearing))
+        val z = distance * cos(toRadians(bearing))
         Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
 
         return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
