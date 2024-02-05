@@ -151,7 +151,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
             return
         }
-        val poseListSorrooundings = listOf(
+        val poseListSurrounding = listOf(
             translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),
             translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),
             translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180.0)),
@@ -160,30 +160,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         )
 
         var i= 0
-            poseListSorrooundings.map { validPose ->
+        poseListSurrounding.map { validPose ->
             val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
             anchorNode = AnchorNode(anchor).apply {
                 parent = arFragment.arSceneView.scene
             }
-                val listName = listOf("North", "East", "South", "West")
-                val name:String = when (i) {
-                    0 -> {
-                        i++
-                        "North"
-                    }
-                    1 -> {
-                        i++
-                        "East"
-                    }
-                    2 -> {
-                        i++
-                        "South"
-                    }
-                    else -> {
-                        i=0
-                        "West"
-                    }
+
+            val name:String = when (i) {
+                0 -> {
+                    i++
+                    "North"
                 }
+                1 -> {
+                    i++
+                    "East"
+                }
+                2 -> {
+                    i++
+                    "South"
+                }
+                else -> {
+                    i=0
+                    "West"
+                }
+            }
+
             // Add the place in AR
             val placeNode = PlaceNode(this@MainActivity, name)
 
@@ -275,7 +276,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val y = .4f
         val z = distance * sin(toRadians(bearing))
         Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
-        //anchorPose.compose(cameraPose)
 
         return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
     }
@@ -289,7 +289,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     //calibrate bearing to real world north
     private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
 //        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        var bearingToTrueNorth = bearing-trueNorth-90.0
+        var bearingToTrueNorth = bearing - trueNorth - 90.0
         Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 90.0 = ($bearingToTrueNorth)")
         return bearingToTrueNorth
     }
@@ -312,7 +312,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val a = sin(dLat / 2).pow(2) + cos(lat1) * cos(lat2) * sin(dLon / 2).pow(2)
         val c = 2 * asin(sqrt(a))
         val distance = 6371.0 * c// Earth's radius in kilometers
-        val distanceInMeters = distance * kilometerToMeter// multiply by 1000
+        val distanceInMeters = distance * kilometerToMeter// multiply by 1000 to get meters
 
         val y = sin(dLon) * cos(lat2)
         val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
