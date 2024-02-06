@@ -25,6 +25,7 @@ import com.google.ar.core.Config
 import com.google.ar.core.Pose
 import com.google.ar.sceneform.AnchorNode
 import com.google.ar.sceneform.ux.TransformableNode
+import com.google.maps.android.ktx.utils.sphericalHeading
 import com.ihsan.arcore_sceneform.api.ApiResponse
 import com.ihsan.arcore_sceneform.api.ApiService
 import com.ihsan.arcore_sceneform.ar.PathNode
@@ -113,7 +114,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     Log.d(TAG, "onPoiResponse: ${poiList.size}")
                     lifecycleScope.launch {
                         placeAnchorNodeForNorth()
-                        //makeAnchorNode(poiList)
+                        makeAnchorNode(poiList)
                     }
                 }
 
@@ -293,8 +294,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     //calibrate bearing to real world north
     private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
 //        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        var bearingToTrueNorth = bearing - trueNorth - 90.0
+        val bearingToTrueNorth = bearing - trueNorth - 90.0
         Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 90.0 = ($bearingToTrueNorth)")
+        return bearingToTrueNorth
+    }
+
+    //calibrate bearing to real world north
+    private fun calibrateBearingToWorldNorthV2(poiLatLng: LatLng): Double {
+        val heading = LatLng(currentLocation!!.latitude, currentLocation!!.longitude).sphericalHeading(poiLatLng)
+        val bearingToTrueNorth = orientationAngles[0] + heading
+        Log.d(TAG, "calibrateBearingToWorldNorthV2: bearing (${orientationAngles[0]}) + trueNorth ($heading) = ($bearingToTrueNorth)")
         return bearingToTrueNorth
     }
 
@@ -320,9 +329,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val y = sin(dLon) * cos(lat2)
         val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+
         val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
         //calibrate bearing to real world north
-        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
+//        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
+
+        val bearing = calibrateBearingToWorldNorthV2(poiLatLng = LatLng(poiLat, poiLon))
 
         //get true north and calculate bearing
         Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")

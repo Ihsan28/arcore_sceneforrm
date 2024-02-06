@@ -47,6 +47,7 @@ class PathNode(
 
         ModelRenderable.builder()
             .setSource(context, R.raw.arch_round)
+            .setIsFilamentGltf(true)
             .build()
             .thenAccept { renderable: ModelRenderable ->
                 setRenderable(renderable)
