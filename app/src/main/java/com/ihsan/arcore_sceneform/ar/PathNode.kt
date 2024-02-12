@@ -2,6 +2,7 @@ package com.ihsan.arcore_sceneform.ar
 
 import android.content.Context
 import android.util.Log
+import android.view.View
 import android.widget.TextView
 import com.google.ar.sceneform.Node
 import com.google.ar.sceneform.rendering.ModelRenderable
@@ -13,8 +14,8 @@ import com.ihsan.arcore_sceneform.models.Poi
 private const val TAG = "PathNode"
 
 class PathNode(
-    val context: Context,
-    val place: Poi?
+    private val context: Context,
+    private val place: Poi?
 ) : Node() {
     var modelRenderable: ModelRenderable? = null
     private var placeRenderable: ViewRenderable? = null
@@ -42,11 +43,12 @@ class PathNode(
                     textViewPlace = renderable.view.findViewById(R.id.placeName)
                     textViewPlace?.text = it.name
                     Log.d(TAG, "onActivate: ${it.name}")
+                    showInfoWindow()
                 }
             }
 
         ModelRenderable.builder()
-            .setSource(context, R.raw.arch_round)
+            .setSource(context, R.raw.arrow_greater_than)
             .setIsFilamentGltf(true)
             .build()
             .thenAccept { renderable: ModelRenderable ->
@@ -57,5 +59,18 @@ class PathNode(
                 Log.e(TAG, "Unable to load Renderable.", throwable)
                 null
             }
+    }
+    fun showInfoWindow() {
+        // Show text
+        textViewPlace?.let {
+            it.visibility = if (it.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+
+        // Hide text for other nodes
+        this.parent?.children?.filter {
+            it is PathNode && it != this
+        }?.forEach {
+            (it as PathNode).textViewPlace?.visibility = View.VISIBLE
+        }
     }
 }

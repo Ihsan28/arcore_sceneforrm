@@ -18,7 +18,7 @@
         android:visibility="gone"
         android:layout_gravity="center"
         android:gravity="center"
-        android:textColor="@android:color/white"
+        android:textColor="@android:color/holo_blue_bright"
         android:shadowColor="@android:color/black"
         android:shadowRadius="1"
         android:shadowDx="1"

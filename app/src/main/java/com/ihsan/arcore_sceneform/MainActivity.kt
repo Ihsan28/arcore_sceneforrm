@@ -126,7 +126,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
                     Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                     lifecycleScope.launch {
-                        //makeAnchorNodeForPoiDirections(coordinates)
+                        makeAnchorNodeForPoiDirections(coordinates)
                     }
                 }
             })
@@ -152,34 +152,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
-    private fun placeAnchorNodeForNorth() {
-        if (currentLocation == null) {
-            Log.e(TAG, "makeAnchorNode: currentLocation is null")
-            return
-        }
-        val poseListSurrounding = listOf(
-            Pair(translateToARCoreCoordinates(2.0, 0.0),"virtualNorth"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),"North"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),"East"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180.0)),"South"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(270.0)),"West"),
-        )
-
-        poseListSurrounding.map { validPose ->
-            val anchor = arFragment.arSceneView.session!!.createAnchor(validPose.first)
-            anchorNode = AnchorNode(anchor).apply {
-                parent = arFragment.arSceneView.scene
-            }
-
-            // Add the place in AR
-            val placeNode = PlaceNode(this@MainActivity, validPose.second)
-
-            placeNode.parent = anchorNode
-
-            Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     private fun makeAnchorNode(poiList: List<Poi>) {
         if (currentLocation == null) {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
@@ -187,11 +159,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         poiList.forEach { poi ->
+
             val (distance, bearing) = calculateDistanceAndBearing(
                 currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
             )
 
-            val pose = translateToARCoreCoordinates(distance, bearing)
+            Log.d(TAG, "makeAnchorNode: ${orientationAngles[0]}")
+            val test=(atan2(poi.latitude - currentLocation!!.latitude, poi.longitude - currentLocation!!.longitude))-orientationAngles[0]
+            val testDistance=(sqrt((poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(2)))*100
+            val testX=cos(test)*testDistance
+            val testY=sin(test)*testDistance
+
+            val pose=Pose.makeTranslation(testX.toFloat(), 0.4f, testY.toFloat())
+            //val pose = translateToARCoreCoordinates(distance, bearing)
             pose.let { validPose ->
                 val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
                 anchorNode = AnchorNode(anchor).apply {
@@ -227,7 +207,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 anchorNode = AnchorNode(anchor).apply {
                     parent = arFragment.arSceneView.scene
                 }
-                val poi = Poi("", "routing", poiPath.lat, poiPath.lon, 0.0)
+                val poi = Poi("", "$i", poiPath.lat, poiPath.lon, 0.0)
 
                 // Add the place in AR
                 val pathNode = PathNode(this@MainActivity, poi)
@@ -253,7 +233,47 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private val kilometerToMeter = 3
+    //calibrate bearing to real world north
+    private fun placeAnchorNodeForNorth() {
+        if (currentLocation == null) {
+            Log.e(TAG, "makeAnchorNode: currentLocation is null")
+            return
+        }
+        val poseListSurrounding = listOf(
+            Pair(translateToARCoreCoordinates(2.0, 0.0),"virtualNorth"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),"North + 0"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(45.0)),"NorthEast + 45"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),"East + 90"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(135.0)),"SouthEast + 135"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180.0)),"South + 180"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(225.0)),"SouthWest + 225"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(270.0)),"West + 270"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(315.0)),"NorthWest + 315")
+        )
+
+        poseListSurrounding.map { validPose ->
+            val anchor = arFragment.arSceneView.session!!.createAnchor(validPose.first)
+            anchorNode = AnchorNode(anchor).apply {
+                parent = arFragment.arSceneView.scene
+            }
+
+            // Add the place in AR
+            val placeNode = PlaceNode(this@MainActivity, validPose.second)
+
+            placeNode.parent = anchorNode
+
+            Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
+        }
+    }
+    private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
+//        var bearingToTrueNorth = bearing - trueNorth - 90.0
+        val calibrateVirtualNorth = 180.0
+        val bearingToTrueNorth = (bearing + calibrateVirtualNorth) + trueNorth
+        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 180.0 = ($bearingToTrueNorth)")
+        return bearingToTrueNorth
+    }
+
+    private val kilometerToMeter = 50.0
     private fun translateToARCoreCoordinates(
         distance: Double, bearing: Double
     ): Pose {
@@ -273,15 +293,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     //use sensor to get true north and calibrate bearing
     private fun getTrueNorth(): Double {
         //round to 3 decimal places
-        return (azimuthInDegrees * 1000).toInt() / 1000.0
-    }
-
-    //calibrate bearing to real world north
-    private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
-//        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        var bearingToTrueNorth = (bearing - 180.0) + trueNorth
-        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 180.0 = ($bearingToTrueNorth)")
-        return bearingToTrueNorth
+        return -((azimuthInDegrees * 1000).toInt() / 1000.0)
     }
 
     //calibrate bearing to real world north
@@ -311,7 +323,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         //haversine formula
         val a = sin(dLat / 2).pow(2) + cos(lat1) * cos(lat2) * sin(dLon / 2).pow(2)
+        //central angle
         val c = 2 * asin(sqrt(a))
+        //distance
         val distance = 6371.0 * c// Earth's radius in kilometers
         val distanceInMeters = distance * kilometerToMeter// multiply by 1000 to get meters
 
@@ -320,9 +334,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
         //calibrate bearing to real world north
-//        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
+        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
 
-        val bearing = calibrateBearingToWorldNorthV2(poiLatLng = LatLng(poiLat, poiLon))
+//        val bearing = calibrateBearingToWorldNorthV2(poiLatLng = LatLng(poiLat, poiLon))
 
         //get true north and calculate bearing
         Log.d(TAG, "calculateDistanceAndBearing: distance $distanceInMeters bearing $bearing")
@@ -384,8 +398,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         azimuthInDegrees = Math.toDegrees(orientationAngles[0].toDouble())*1000/1000.0
         compassView.rotation = -azimuthInDegrees.toFloat()
+        if (azimuthInDegrees < 0) {
+            azimuthInDegrees += 360.0
+        }
 
-        azimuthView.text = "azimuth: $azimuthInDegrees"
+        azimuthView.text = "azimuth: ${orientationAngles[0]}°"
     }
 
     // Constants
