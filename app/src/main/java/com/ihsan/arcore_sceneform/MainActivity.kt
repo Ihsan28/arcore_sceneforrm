@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.getSystemService
+import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -69,6 +70,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var anchorNode: AnchorNode? = null
     private var currentLocation: Location? = null
     private var azimuthInDegrees = 0.0
+
+    private val mutableRotation = MutableLiveData<Float>()
 
     private lateinit var apiService: ApiService
 
@@ -403,6 +406,86 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         azimuthView.text = "azimuth: ${orientationAngles[0]}°"
+    }
+
+    private fun calibrateSensor3Axis(){
+
+        SensorManager.getOrientation(rotationMatrix, orientationAngles)
+        val azimuth = orientationAngles[0]
+        val pitch = orientationAngles[1]
+        val roll = orientationAngles[2]
+        val rollMatrix= arrayOf(
+            arrayOf(1f, 0f, 0f),
+            arrayOf(0f, cos(roll), -sin(roll)),
+            arrayOf(0f, sin(roll), cos(roll))
+        )
+        val pitchMatrix = arrayOf(
+            arrayOf(cos(pitch), 0f, sin(pitch)),
+            arrayOf(0f, 1f, 0f),
+            arrayOf(-sin(pitch), 0f, cos(pitch))
+        )
+        val x = arrayOf(arrayOf(azimuth), arrayOf(pitch), arrayOf(roll))
+        val y = multiplyMatrices(pitchMatrix, rollMatrix)
+        val z = multiplyMatrices(y, x)
+        mutableRotation.postValue(-((Math.toDegrees(z[0][0].toDouble()) + 360) % 360).toFloat())
+
+    }
+
+    fun multiplyMatrices(matrix1: Array<Array<Float>>, matrix2: Array<Array<Float>>): Array<Array<Float>> {
+        val row1 = matrix1.size
+        val col1 = matrix1[0].size
+        val col2 = matrix2[0].size
+        val product = Array(row1) { Array(col2) { 0f } }
+
+        for (i in 0 until row1) {
+            for (j in 0 until col2) {
+                for (k in 0 until col1) {
+                    product[i][j] += matrix1[i][k] * matrix2[k][j]
+                }
+            }
+        }
+
+        return product
+    }
+    private fun calibrateCompass3Axis(){
+        val alpha = 0.97f
+        if (lastAccelerometerSet) {
+            lastAccelerometer[0] = alpha * lastAccelerometer[0] + (1 - alpha) * accelerometerReading[0]
+            lastAccelerometer[1] = alpha * lastAccelerometer[1] + (1 - alpha) * accelerometerReading[1]
+            lastAccelerometer[2] = alpha * lastAccelerometer[2] + (1 - alpha) * accelerometerReading[2]
+        } else {
+            lastAccelerometer[0] = accelerometerReading[0]
+            lastAccelerometer[1] = accelerometerReading[1]
+            lastAccelerometer[2] = accelerometerReading[2]
+            lastAccelerometerSet
+        }
+
+        if (lastMagnetometerSet) {
+            lastMagnetometer[0] = alpha * lastMagnetometer[0] + (1 - alpha) * magnetometerReading[0]
+            lastMagnetometer[1] = alpha * lastMagnetometer[1] + (1 - alpha) * magnetometerReading[1]
+            lastMagnetometer[2] = alpha * lastMagnetometer[2] + (1 - alpha) * magnetometerReading[2]
+        } else {
+            lastMagnetometer[0] = magnetometerReading[0]
+            lastMagnetometer[1] = magnetometerReading[1]
+            lastMagnetometer[2] = magnetometerReading[2]
+            lastMagnetometerSet
+        }
+
+        val rotationMatrix = FloatArray(9)
+        val inclineMatrix = FloatArray(9)
+        val remappedR = FloatArray(9)
+        val success = SensorManager.getRotationMatrix(rotationMatrix, inclineMatrix, lastAccelerometer, lastMagnetometer)
+        if (success) {
+            SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, remappedR)
+            val orientation = FloatArray(3)
+            SensorManager.getOrientation(remappedR, orientation)
+            var azimuth = Math.toDegrees(orientation[0].toDouble())*1000/1000.0
+            compassView.rotation = -azimuth.toFloat()
+            if (azimuth < 0) {
+                azimuth += 360.0
+            }
+            azimuthView.text = "azimuth: $azimuth°"
+        }
     }
 
     // Constants
