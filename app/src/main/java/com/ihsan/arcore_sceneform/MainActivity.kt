@@ -64,8 +64,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private val lastAccelerometer = FloatArray(3)
     private val lastMagnetometer = FloatArray(3)
-    private val lastAccelerometerSet = false
-    private val lastMagnetometerSet = false
+    private var lastAccelerometerSet = false
+    private var lastMagnetometerSet = false
 
     private var anchorNode: AnchorNode? = null
     private var currentLocation: Location? = null
@@ -457,7 +457,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             lastAccelerometer[0] = accelerometerReading[0]
             lastAccelerometer[1] = accelerometerReading[1]
             lastAccelerometer[2] = accelerometerReading[2]
-            lastAccelerometerSet
+            lastAccelerometerSet=true
         }
 
         if (lastMagnetometerSet) {
@@ -468,7 +468,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             lastMagnetometer[0] = magnetometerReading[0]
             lastMagnetometer[1] = magnetometerReading[1]
             lastMagnetometer[2] = magnetometerReading[2]
-            lastMagnetometerSet
+            lastMagnetometerSet=true
         }
 
         val rotationMatrix = FloatArray(9)
