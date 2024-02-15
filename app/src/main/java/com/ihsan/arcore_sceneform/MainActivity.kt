@@ -1,15 +1,20 @@
 package com.ihsan.arcore_sceneform
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.widget.ImageView
 import android.widget.TextView
@@ -57,8 +62,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     // Sensor
     private lateinit var sensorManager: SensorManager
-    private val accelerometerReading = FloatArray(3)
-    private val magnetometerReading = FloatArray(3)
+    private var accelerometerReading = FloatArray(3)
+    private var magnetometerReading = FloatArray(3)
     private val rotationMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
 
@@ -74,6 +79,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val mutableRotation = MutableLiveData<Float>()
 
     private lateinit var apiService: ApiService
+
+    //testing
+    private lateinit var locationManager: LocationManager
+
+    private var accelerometer: Sensor? = null
+    private var magnetometer: Sensor? = null
+
+    private var magneticDeclination: Float = 0f
+
+    private val alpha = 0.1f // Smoothing constant
+
+    private val windowSize = 10 // Size of the moving average window
+    private val azimuthQueue = ArrayDeque<Float>(windowSize)
+    private var lastAzimuthDisplayed = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,25 +153,33 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
             })
         }
+
+        //testing
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        registerListeners()
+        requestLocationUpdates()
+    }
+    private fun registerListeners() {
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_NORMAL)
+    }
+
+    private fun unregisterListeners() {
+        sensorManager.unregisterListener(this)
     }
 
     override fun onResume() {
         super.onResume()
-        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.also {
-            sensorManager.registerListener(
-                this, it, SensorManager.SENSOR_DELAY_NORMAL
-            )
-        }
-        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also {
-            sensorManager.registerListener(
-                this, it, SensorManager.SENSOR_DELAY_NORMAL
-            )
-        }
+        registerListeners()
     }
 
     override fun onPause() {
         super.onPause()
-        sensorManager.unregisterListener(this)
+        unregisterListeners()
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
@@ -381,35 +408,123 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         //Log.d(TAG, "onAccuracyChanged: $sensor, $accuracy")
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null) {
-            return
+    private fun lowPass(input: FloatArray, output: FloatArray?): FloatArray {
+        if (output == null) return input
+        for (i in input.indices) {
+            output[i] = output[i] * (1 - alpha) + alpha * (input[i] - output[i])
         }
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
-            //Log.d(TAG, "Accelerometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
-        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
-            //Log.d(TAG, "Magnetometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
-        }
-
-        // Update rotation matrix, which is needed to update orientation angles.
-        SensorManager.getRotationMatrix(
-            rotationMatrix, null, accelerometerReading, magnetometerReading
-        )
-        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-
-        azimuthInDegrees = Math.toDegrees(orientationAngles[0].toDouble())*1000/1000.0
-        compassView.rotation = -azimuthInDegrees.toFloat()
-        if (azimuthInDegrees < 0) {
-            azimuthInDegrees += 360.0
-        }
-
-        azimuthView.text = "azimuth: ${orientationAngles[0]}°"
+        return output
     }
 
-    private fun calibrateSensor3Axis(){
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            accelerometerReading = lowPass(event.values.clone(), accelerometerReading)
+        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            magnetometerReading = lowPass(event.values.clone(), magnetometerReading)
+        }
+        updateOrientationAngles()
+    }
 
+
+    @SuppressLint("SetTextI18n")
+    private fun updateOrientationAngles() {
+        val rotationMatrix = FloatArray(9)
+        SensorManager.getRotationMatrix(
+            rotationMatrix,
+            null,
+            accelerometerReading,
+            magnetometerReading
+        )
+
+        val orientationAngles = FloatArray(3)
+        SensorManager.getOrientation(rotationMatrix, orientationAngles)
+
+        val azimuthInRadians = orientationAngles[0]
+        val azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble())
+        val trueNorthAzimuth = (azimuthInDegrees + magneticDeclination).toFloat()
+
+        enqueueAzimuth(trueNorthAzimuth)
+        var averagedAzimuth = azimuthQueue.average().toFloat()
+
+        if (Math.abs(averagedAzimuth - lastAzimuthDisplayed) > 1) {
+            if (averagedAzimuth<0){
+                averagedAzimuth+=360
+            }
+            azimuthView.text = "True North: ${averagedAzimuth.toInt()}°"
+            compassView.rotation=averagedAzimuth
+            lastAzimuthDisplayed = averagedAzimuth
+        }
+    }
+
+    private fun enqueueAzimuth(azimuth: Float) {
+        if (azimuthQueue.size >= windowSize) {
+            azimuthQueue.removeFirst()
+        }
+        azimuthQueue.addLast(azimuth)
+    }
+
+    private fun requestLocationUpdates() {
+        if (ActivityCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        locationManager.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER, 0L, 0f, locationListener, Looper.getMainLooper()
+        )
+    }
+
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            val geomagneticField = GeomagneticField(
+                location.latitude.toFloat(),
+                location.longitude.toFloat(),
+                location.altitude.toFloat(),
+                System.currentTimeMillis()
+            )
+            magneticDeclination = geomagneticField.declination
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
+        }
+
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
+
+//    override fun onSensorChanged(event: SensorEvent?) {
+//        if (event == null) {
+//            return
+//        }
+//        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+//            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
+//            //Log.d(TAG, "Accelerometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
+//        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+//            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
+//            //Log.d(TAG, "Magnetometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
+//        }
+//
+//        // Update rotation matrix, which is needed to update orientation angles.
+//        SensorManager.getRotationMatrix(
+//            rotationMatrix, null, accelerometerReading, magnetometerReading
+//        )
+//        SensorManager.getOrientation(rotationMatrix, orientationAngles)
+//
+////        azimuthInDegrees = Math.toDegrees(orientationAngles[0].toDouble())*1000/1000.0
+////        compassView.rotation = -azimuthInDegrees.toFloat()
+////        if (azimuthInDegrees < 0) {
+////            azimuthInDegrees += 360.0
+////        }
+////
+////        azimuthView.text = "azimuth: ${orientationAngles[0]}°"
+//        calibrateSensor3Axis()
+//    }
+
+    private fun calibrateSensor3Axis(){
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
         val azimuth = orientationAngles[0]
         val pitch = orientationAngles[1]
@@ -427,8 +542,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val x = arrayOf(arrayOf(azimuth), arrayOf(pitch), arrayOf(roll))
         val y = multiplyMatrices(pitchMatrix, rollMatrix)
         val z = multiplyMatrices(y, x)
-        mutableRotation.postValue(-((Math.toDegrees(z[0][0].toDouble()) + 360) % 360).toFloat())
 
+        val finalValueInRadians =-((Math.toDegrees(z[0][0].toDouble()) + 360) % 360).toFloat()
+        mutableRotation.postValue(finalValueInRadians)
+
+        compassView.rotation = finalValueInRadians
+
+        azimuthView.text = "azimuth: ${finalValueInRadians}°"
     }
 
     fun multiplyMatrices(matrix1: Array<Array<Float>>, matrix2: Array<Array<Float>>): Array<Array<Float>> {
@@ -479,6 +599,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, remappedR)
             val orientation = FloatArray(3)
             SensorManager.getOrientation(remappedR, orientation)
+
             var azimuth = Math.toDegrees(orientation[0].toDouble())*1000/1000.0
             compassView.rotation = -azimuth.toFloat()
             if (azimuth < 0) {
