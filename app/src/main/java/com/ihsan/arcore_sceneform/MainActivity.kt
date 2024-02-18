@@ -40,8 +40,12 @@ import com.ihsan.arcore_sceneform.ar.PlacesArFragment
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
 import com.ihsan.arcore_sceneform.models.getPositionVector
+import com.ihsan.arcore_sceneform.sensorservice.Compass
+import com.ihsan.arcore_sceneform.sensorservice.CompassListener
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.lang.Math.toRadians
+import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -49,7 +53,7 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-class MainActivity : AppCompatActivity(), SensorEventListener {
+class MainActivity : AppCompatActivity() {
 
     private val TAG = "MainActivity"
 
@@ -57,42 +61,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var compassView:ImageView
     private lateinit var azimuthView: TextView
 
-    // Location
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-
-    // Sensor
-    private lateinit var sensorManager: SensorManager
-    private var accelerometerReading = FloatArray(3)
-    private var magnetometerReading = FloatArray(3)
-    private val rotationMatrix = FloatArray(9)
-    private val orientationAngles = FloatArray(3)
-
-    private val lastAccelerometer = FloatArray(3)
-    private val lastMagnetometer = FloatArray(3)
-    private var lastAccelerometerSet = false
-    private var lastMagnetometerSet = false
-
     private var anchorNode: AnchorNode? = null
     private var currentLocation: Location? = null
-    private var azimuthInDegrees = 0.0
+    private var azimuthInDegrees = 0.0f
 
-    private val mutableRotation = MutableLiveData<Float>()
-
+    private var orientationAngles = FloatArray(3)
     private lateinit var apiService: ApiService
 
-    //testing
-    private lateinit var locationManager: LocationManager
-
-    private var accelerometer: Sensor? = null
-    private var magnetometer: Sensor? = null
-
-    private var magneticDeclination: Float = 0f
-
-    private val alpha = 0.1f // Smoothing constant
-
-    private val windowSize = 10 // Size of the moving average window
-    private val azimuthQueue = ArrayDeque<Float>(windowSize)
-    private var lastAzimuthDisplayed = 0f
+    //compass
+    private lateinit var compass: Compass
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,67 +96,71 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             it.arSceneView.scene.camera.farClipPlane = 5000f
         }
 
-        sensorManager = getSystemService()!!
-        //placesService = PlacesService.create()
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        //get compass
+        compass=Compass(this,object : CompassListener {
+            @SuppressLint("SetTextI18n")
+            override fun onNewAzimuth(aziInDeg: Float, magneticDeclination: Float, orientation: FloatArray) {
+                orientationAngles = orientation
+                compassView.rotation = -aziInDeg
+                azimuthInDegrees = aziInDeg
+                azimuthView.text = "azimuth: $azimuthInDegrees° \nmagneticDeclination: $magneticDeclination° \norientation: ${orientation[0]}°, ${orientation[1]}°, ${orientation[2]}° \nlocation: ${currentLocation?.latitude}, ${currentLocation?.longitude}"
+            }
 
-        getCurrentLocation {
-            apiService = ApiService(it, object : ApiResponse {
-                override fun onResponse(response: String) {
-                    Log.d(TAG, "onResponse: $response")
-                }
+            override fun getCurrentLocation(location: Location) {
+                lifecycleScope.launch {
 
-                override fun onError(error: String) {
-                    Log.d(TAG, "onError: $error")
-                }
-
-                override fun onLoading(isLoading: Boolean) {
-                    Log.d(TAG, "onLoading: $isLoading")
-                }
-
-                override fun onPoiResponse(poiList: List<Poi>) {
-                    Log.d(TAG, "onPoiResponse: ${poiList.size}")
-                    lifecycleScope.launch {
+                    // Wait for ARCore to be ready
+                    while (arFragment.arSceneView.arFrame!!.camera.trackingState != com.google.ar.core.TrackingState.TRACKING) {
+                        Log.d(TAG, "getCurrentLocation: waiting for plane")
+                        delay(500)
+                    }
+                    // Place the anchor node
+                    if (currentLocation == null) {
+                        currentLocation = location
+                        Log.d(TAG, "getCurrentLocation: placeAnchorNodeForNorth")
                         placeAnchorNodeForNorth()
-                        makeAnchorNode(poiList)
+                        apiService = ApiService(location, object : ApiResponse {
+                            override fun onResponse(response: String) {
+                                Log.d(TAG, "onResponse: $response")
+                            }
+
+                            override fun onError(error: String) {
+                                Log.d(TAG, "onError: $error")
+                            }
+
+                            override fun onLoading(isLoading: Boolean) {
+                                Log.d(TAG, "onLoading: $isLoading")
+                            }
+
+                            override fun onPoiResponse(poiList: List<Poi>) {
+                                Log.d(TAG, "onPoiResponse: ${poiList.size}")
+                                lifecycleScope.launch {
+                                    makeAnchorNode(poiList)
+                                }
+                            }
+
+                            override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
+                                Log.d(TAG, "onPoiDirectionResponse: $coordinates")
+                                lifecycleScope.launch {
+                                    makeAnchorNodeForPoiDirections(coordinates)
+                                }
+                            }
+                        })
                     }
                 }
+            }
+        })
 
-                override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
-                    Log.d(TAG, "onPoiDirectionResponse: $coordinates")
-                    lifecycleScope.launch {
-                        makeAnchorNodeForPoiDirections(coordinates)
-                    }
-                }
-            })
-        }
-
-        //testing
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-        registerListeners()
-        requestLocationUpdates()
-    }
-    private fun registerListeners() {
-        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
-        sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_NORMAL)
-    }
-
-    private fun unregisterListeners() {
-        sensorManager.unregisterListener(this)
     }
 
     override fun onResume() {
         super.onResume()
-        registerListeners()
+        compass.registerListeners()
     }
 
     override fun onPause() {
         super.onPause()
-        unregisterListeners()
+        compass.unregisterListeners()
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
@@ -194,7 +175,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
             )
 
-            Log.d(TAG, "makeAnchorNode: ${orientationAngles[0]}")
             val test=(atan2(poi.latitude - currentLocation!!.latitude, poi.longitude - currentLocation!!.longitude))-orientationAngles[0]
             val testDistance=(sqrt((poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(2)))*100
             val testX=cos(test)*testDistance
@@ -269,8 +249,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Log.e(TAG, "makeAnchorNode: currentLocation is null")
             return
         }
+        Toast.makeText(this, " virtual compass", Toast.LENGTH_SHORT).show()
         val poseListSurrounding = listOf(
             Pair(translateToARCoreCoordinates(2.0, 0.0),"virtualNorth"),
+            Pair(translateToARCoreCoordinates(2.0, 95.0),"virtualNorth+95"),
             Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),"North + 0"),
             Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(45.0)),"NorthEast + 45"),
             Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),"East + 90"),
@@ -289,17 +271,63 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             // Add the place in AR
             val placeNode = PlaceNode(this@MainActivity, validPose.second)
+            Log.d(TAG, "placeAnchorNodeForNorth:bearing valid pose ${validPose.first}, ${validPose.second}")
 
             placeNode.parent = anchorNode
 
             Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
         }
     }
-    private fun calibrateBearingToWorldNorth(bearing: Double, trueNorth: Double=getTrueNorth()): Double {
+    fun getCompassDirection(azimuth: Float): String {
+        return when (azimuth) {
+            in 337.5..360.0 -> "N"
+            in 0.0..22.5 -> "N"
+            in 22.5..67.5 -> "NE"
+            in 67.5..112.5 -> "E"
+            in 112.5..157.5 -> "SE"
+            in 157.5..202.5 -> "S"
+            in 202.5..247.5 -> "SW"
+            in 247.5..292.5 -> "W"
+            in 292.5..337.5 -> "NW"
+            else -> "N"
+        }
+    }
+
+    fun makePositiveRange(azimuth: Float): Float {
+        var positiveAzimuth = azimuth
+
+        if (positiveAzimuth<-360f){
+            positiveAzimuth %= -360f
+            positiveAzimuth += 360f
+        }else if (positiveAzimuth>360f){
+            positiveAzimuth %= 360f
+        }else if (positiveAzimuth<0){
+            positiveAzimuth += 360f
+        }
+
+        return positiveAzimuth
+    }
+
+    private fun calibrateBearingToWorldNorth(bearing: Double): Double {
 //        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        val calibrateVirtualNorth = 180.0
-        val bearingToTrueNorth = (bearing + calibrateVirtualNorth) + trueNorth
-        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) - 180.0 = ($bearingToTrueNorth)")
+        val calibrateVirtualNorth = 180.0//virtual north always 180 angled from camera view
+        val trueNorth=-azimuthInDegrees*1000/1000.0
+        var bearingToTrueNorth = if (bearing > trueNorth) {
+            bearing - trueNorth
+        } else {
+            trueNorth - bearing
+        }
+
+//        if (abs(bearingToTrueNorth) > 360.0) {
+//            bearingToTrueNorth %= 360.0
+//        }
+
+//        bearingToTrueNorth = -bearingToTrueNorth
+
+//        if (bearingToTrueNorth < 0) {
+//            bearingToTrueNorth += 360.0
+//        }
+        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) = ($bearingToTrueNorth)")
         return bearingToTrueNorth
     }
 
@@ -318,12 +346,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         Log.d(TAG, "translateToARCoreCoordinates: x: $x, y: $y, z: $z")
 
         return Pose.makeTranslation(x.toFloat(), y.toFloat(), z.toFloat())
-    }
-
-    //use sensor to get true north and calibrate bearing
-    private fun getTrueNorth(): Double {
-        //round to 3 decimal places
-        return -((azimuthInDegrees * 1000).toInt() / 1000.0)
     }
 
     //calibrate bearing to real world north
@@ -374,24 +396,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return Pair(distanceInMeters, bearing)
     }
 
-    private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-            currentLocation = location
-            onSuccess(location)
-            Log.d(TAG, "getlocation: CurrentLocation ${location.latitude} ${location.longitude}")
-        }.addOnFailureListener {
-            Log.e(TAG, "Could not get location")
-        }
-    }
-
     private fun isSupportedDevice(): Boolean {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val openGlVersionString = activityManager.deviceConfigurationInfo.glEsVersion
@@ -404,240 +408,35 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return true
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        //Log.d(TAG, "onAccuracyChanged: $sensor, $accuracy")
-    }
-
-    private fun lowPass(input: FloatArray, output: FloatArray?): FloatArray {
-        if (output == null) return input
-        for (i in input.indices) {
-            output[i] = output[i] * (1 - alpha) + alpha * (input[i] - output[i])
-        }
-        return output
-    }
-
-    override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            accelerometerReading = lowPass(event.values.clone(), accelerometerReading)
-        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-            magnetometerReading = lowPass(event.values.clone(), magnetometerReading)
-        }
-        updateOrientationAngles()
-    }
-
-
-    @SuppressLint("SetTextI18n")
-    private fun updateOrientationAngles() {
-        val rotationMatrix = FloatArray(9)
-        SensorManager.getRotationMatrix(
-            rotationMatrix,
-            null,
-            accelerometerReading,
-            magnetometerReading
-        )
-
-        val orientationAngles = FloatArray(3)
-        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-
-        val azimuthInRadians = orientationAngles[0]
-        val azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble())
-        val trueNorthAzimuth = (azimuthInDegrees + magneticDeclination).toFloat()
-
-        enqueueAzimuth(trueNorthAzimuth)
-        var averagedAzimuth = azimuthQueue.average().toFloat()
-
-        if (Math.abs(averagedAzimuth - lastAzimuthDisplayed) > 1) {
-            if (averagedAzimuth<0){
-                averagedAzimuth+=360
-            }
-            azimuthView.text = "True North: ${averagedAzimuth.toInt()}°"
-            compassView.rotation=averagedAzimuth
-            lastAzimuthDisplayed = averagedAzimuth
-        }
-    }
-
-    private fun enqueueAzimuth(azimuth: Float) {
-        if (azimuthQueue.size >= windowSize) {
-            azimuthQueue.removeFirst()
-        }
-        azimuthQueue.addLast(azimuth)
-    }
-
-    private fun requestLocationUpdates() {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        locationManager.requestLocationUpdates(
-            LocationManager.GPS_PROVIDER, 0L, 0f, locationListener, Looper.getMainLooper()
-        )
-    }
-
-    private val locationListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            val geomagneticField = GeomagneticField(
-                location.latitude.toFloat(),
-                location.longitude.toFloat(),
-                location.altitude.toFloat(),
-                System.currentTimeMillis()
-            )
-            magneticDeclination = geomagneticField.declination
-        }
-
-        @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
-        }
-
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
-    }
-
-//    override fun onSensorChanged(event: SensorEvent?) {
-//        if (event == null) {
-//            return
-//        }
-//        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-//            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
-//            //Log.d(TAG, "Accelerometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
-//        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-//            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
-//            //Log.d(TAG, "Magnetometer: ${event.values[0]}, ${event.values[1]}, ${event.values[2]}")
-//        }
+//    // Constants
+//    private val MAX_SCALE_FACTOR = 5.0f
+//    private fun calculateScaleFactor1(distance: Double): Float {
+//        // You can adjust this formula as needed
+//        val scaleFactor = 1.0f / distance.toFloat()
 //
-//        // Update rotation matrix, which is needed to update orientation angles.
-//        SensorManager.getRotationMatrix(
-//            rotationMatrix, null, accelerometerReading, magnetometerReading
-//        )
-//        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-//
-////        azimuthInDegrees = Math.toDegrees(orientationAngles[0].toDouble())*1000/1000.0
-////        compassView.rotation = -azimuthInDegrees.toFloat()
-////        if (azimuthInDegrees < 0) {
-////            azimuthInDegrees += 360.0
-////        }
-////
-////        azimuthView.text = "azimuth: ${orientationAngles[0]}°"
-//        calibrateSensor3Axis()
+//        // Ensure a minimum scale to prevent the node from becoming too large
+//        return scaleFactor.coerceAtMost(MAX_SCALE_FACTOR)
 //    }
-
-    private fun calibrateSensor3Axis(){
-        SensorManager.getOrientation(rotationMatrix, orientationAngles)
-        val azimuth = orientationAngles[0]
-        val pitch = orientationAngles[1]
-        val roll = orientationAngles[2]
-        val rollMatrix= arrayOf(
-            arrayOf(1f, 0f, 0f),
-            arrayOf(0f, cos(roll), -sin(roll)),
-            arrayOf(0f, sin(roll), cos(roll))
-        )
-        val pitchMatrix = arrayOf(
-            arrayOf(cos(pitch), 0f, sin(pitch)),
-            arrayOf(0f, 1f, 0f),
-            arrayOf(-sin(pitch), 0f, cos(pitch))
-        )
-        val x = arrayOf(arrayOf(azimuth), arrayOf(pitch), arrayOf(roll))
-        val y = multiplyMatrices(pitchMatrix, rollMatrix)
-        val z = multiplyMatrices(y, x)
-
-        val finalValueInRadians =-((Math.toDegrees(z[0][0].toDouble()) + 360) % 360).toFloat()
-        mutableRotation.postValue(finalValueInRadians)
-
-        compassView.rotation = finalValueInRadians
-
-        azimuthView.text = "azimuth: ${finalValueInRadians}°"
-    }
-
-    fun multiplyMatrices(matrix1: Array<Array<Float>>, matrix2: Array<Array<Float>>): Array<Array<Float>> {
-        val row1 = matrix1.size
-        val col1 = matrix1[0].size
-        val col2 = matrix2[0].size
-        val product = Array(row1) { Array(col2) { 0f } }
-
-        for (i in 0 until row1) {
-            for (j in 0 until col2) {
-                for (k in 0 until col1) {
-                    product[i][j] += matrix1[i][k] * matrix2[k][j]
-                }
-            }
-        }
-
-        return product
-    }
-    private fun calibrateCompass3Axis(){
-        val alpha = 0.97f
-        if (lastAccelerometerSet) {
-            lastAccelerometer[0] = alpha * lastAccelerometer[0] + (1 - alpha) * accelerometerReading[0]
-            lastAccelerometer[1] = alpha * lastAccelerometer[1] + (1 - alpha) * accelerometerReading[1]
-            lastAccelerometer[2] = alpha * lastAccelerometer[2] + (1 - alpha) * accelerometerReading[2]
-        } else {
-            lastAccelerometer[0] = accelerometerReading[0]
-            lastAccelerometer[1] = accelerometerReading[1]
-            lastAccelerometer[2] = accelerometerReading[2]
-            lastAccelerometerSet=true
-        }
-
-        if (lastMagnetometerSet) {
-            lastMagnetometer[0] = alpha * lastMagnetometer[0] + (1 - alpha) * magnetometerReading[0]
-            lastMagnetometer[1] = alpha * lastMagnetometer[1] + (1 - alpha) * magnetometerReading[1]
-            lastMagnetometer[2] = alpha * lastMagnetometer[2] + (1 - alpha) * magnetometerReading[2]
-        } else {
-            lastMagnetometer[0] = magnetometerReading[0]
-            lastMagnetometer[1] = magnetometerReading[1]
-            lastMagnetometer[2] = magnetometerReading[2]
-            lastMagnetometerSet=true
-        }
-
-        val rotationMatrix = FloatArray(9)
-        val inclineMatrix = FloatArray(9)
-        val remappedR = FloatArray(9)
-        val success = SensorManager.getRotationMatrix(rotationMatrix, inclineMatrix, lastAccelerometer, lastMagnetometer)
-        if (success) {
-            SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, remappedR)
-            val orientation = FloatArray(3)
-            SensorManager.getOrientation(remappedR, orientation)
-
-            var azimuth = Math.toDegrees(orientation[0].toDouble())*1000/1000.0
-            compassView.rotation = -azimuth.toFloat()
-            if (azimuth < 0) {
-                azimuth += 360.0
-            }
-            azimuthView.text = "azimuth: $azimuth°"
-        }
-    }
-
-    // Constants
-    private val MAX_SCALE_FACTOR = 5.0f
-    private fun calculateScaleFactor1(distance: Double): Float {
-        // You can adjust this formula as needed
-        val scaleFactor = 1.0f / distance.toFloat()
-
-        // Ensure a minimum scale to prevent the node from becoming too large
-        return scaleFactor.coerceAtMost(MAX_SCALE_FACTOR)
-    }
-
-    private fun calculateScaleFactor(distance: Double): Float {
-        val minDistance = 100.0 // Minimum distance for base scale
-        val maxDistance = 5000.0 // Maximum distance (5 km)
-
-        val baseScale = 5.0f // Scale at minDistance
-        val minScale = 0.5f // Scale at maxDistance
-
-        // Linear scaling formula
-        val scaleFactor = if (distance < minDistance) {
-            baseScale
-        } else {
-            // Scale down as distance increases
-            val scale =
-                baseScale - ((distance - minDistance) / (maxDistance - minDistance)) * (baseScale - minScale)
-            scale.coerceAtLeast(minScale.toDouble()).toFloat()
-        }
-
-        return scaleFactor
-    }
+//
+//    private fun calculateScaleFactor(distance: Double): Float {
+//        val minDistance = 100.0 // Minimum distance for base scale
+//        val maxDistance = 5000.0 // Maximum distance (5 km)
+//
+//        val baseScale = 5.0f // Scale at minDistance
+//        val minScale = 0.5f // Scale at maxDistance
+//
+//        // Linear scaling formula
+//        val scaleFactor = if (distance < minDistance) {
+//            baseScale
+//        } else {
+//            // Scale down as distance increases
+//            val scale =
+//                baseScale - ((distance - minDistance) / (maxDistance - minDistance)) * (baseScale - minScale)
+//            scale.coerceAtLeast(minScale.toDouble()).toFloat()
+//        }
+//
+//        return scaleFactor
+//    }
 
 }//MainActivity
 
