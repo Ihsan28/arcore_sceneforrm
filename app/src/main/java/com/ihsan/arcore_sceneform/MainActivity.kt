@@ -90,6 +90,12 @@ class MainActivity : AppCompatActivity() {
             it.arSceneView.scene.camera.farClipPlane = 5000f
         }
 
+        arFragment.setOnTapArPlaneListener { hitResult, plane, motionEvent ->
+            // Do something with the tap
+            val size=arFragment.arSceneView.session?.allAnchors?.size
+            Toast.makeText(this, "size: $size", Toast.LENGTH_SHORT).show()
+        }
+
         //get compass
         compass = Compass(this, object : CompassListener {
             @SuppressLint("SetTextI18n")
@@ -239,12 +245,6 @@ class MainActivity : AppCompatActivity() {
                 /*val scaleFactor = calculateScaleFactor(distance)
                 pathNode.localScale = Vector3(scaleFactor, scaleFactor, scaleFactor)*/
 
-                val andyRenderable = pathNode.modelRenderable
-                val andy = TransformableNode(arFragment.getTransformationSystem())
-                andy.parent = anchorNode
-                andy.renderable = andyRenderable
-                andy.select()
-                pathNode.parent = anchorNode
             }
         }
     }
@@ -340,9 +340,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun calibrateBearingToWorldNorth(bearing: Float): Double {
-//        var bearingToTrueNorth = bearing - trueNorth - 90.0
-        val calibrateVirtualNorth = 180.0//virtual north always 180 angled from camera view
-        var trueNorth = -azimuthInDegrees
+        var trueNorth = azimuthInDegrees+180//ar 180 calibrate with true north
         trueNorth = makePositiveRange(trueNorth)
         var positiveBearing = makePositiveRange(bearing)
         var bearingToTrueNorth = positiveBearing - trueNorth
@@ -350,9 +348,12 @@ class MainActivity : AppCompatActivity() {
         var clockwiseBearing = 360 - makePositiveRange(bearingToTrueNorth)
 
         when(bearing){
-            0f-> Log.d(TAG, "calibrateBearingToWorldNorth: North clockwise $clockwiseBearing")
+            0f-> Log.d(TAG, "calibrateBearingToWorldNorth: North clockwise $clockwiseBearing \n trueNorth $trueNorth")
+            45f-> Log.d(TAG, "calibrateBearingToWorldNorth: Northeast clockwise $clockwiseBearing")
             90f-> Log.d(TAG, "calibrateBearingToWorldNorth: East counterclockwise $clockwiseBearing")
+            135f-> Log.d(TAG, "calibrateBearingToWorldNorth: Southeast counterclockwise $clockwiseBearing")
             180f-> Log.d(TAG, "calibrateBearingToWorldNorth: South clockwise $clockwiseBearing")
+            225f-> Log.d(TAG, "calibrateBearingToWorldNorth: Southwest counterclockwise $clockwiseBearing")
             270f-> Log.d(TAG, "calibrateBearingToWorldNorth: West counterclockwise $clockwiseBearing")
         }
 
