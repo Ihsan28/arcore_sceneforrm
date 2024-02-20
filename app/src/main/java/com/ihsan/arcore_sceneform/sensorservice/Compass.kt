@@ -176,10 +176,13 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
         var averagedAzimuth = azimuthQueue.average().toFloat()
 
         if (abs(averagedAzimuth - lastAzimuthDisplayed) > 1) {
+            lastAzimuthDisplayed = averagedAzimuth
+
             if (averagedAzimuth<0){
                 averagedAzimuth+=360
             }
-            lastAzimuthDisplayed = averagedAzimuth
+
+            averagedAzimuth= averagedAzimuth*100/100
 
             //passing azimuth through azimuth
             listener.onNewAzimuth(averagedAzimuth, magneticDeclination, orientationAngles)

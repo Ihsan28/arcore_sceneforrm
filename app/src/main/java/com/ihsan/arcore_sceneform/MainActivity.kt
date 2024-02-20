@@ -1,35 +1,21 @@
 package com.ihsan.arcore_sceneform
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
-import android.content.pm.PackageManager
-import android.hardware.GeomagneticField
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Bundle
-import android.os.Looper
 import android.util.Log
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.getSystemService
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.lifecycleScope
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import com.google.ar.core.Config
 import com.google.ar.core.Pose
 import com.google.ar.sceneform.AnchorNode
+import com.google.ar.sceneform.rendering.PlaneRenderer
 import com.google.ar.sceneform.ux.TransformableNode
 import com.google.maps.android.ktx.utils.sphericalHeading
 import com.ihsan.arcore_sceneform.api.ApiResponse
@@ -45,7 +31,6 @@ import com.ihsan.arcore_sceneform.sensorservice.CompassListener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.lang.Math.toRadians
-import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -58,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
 
     private lateinit var arFragment: PlacesArFragment
-    private lateinit var compassView:ImageView
+    private lateinit var compassView: ImageView
     private lateinit var azimuthView: TextView
 
     private var anchorNode: AnchorNode? = null
@@ -80,15 +65,24 @@ class MainActivity : AppCompatActivity() {
         azimuthView = findViewById(R.id.azimuth)
 
         arFragment.let {
+            it.arSceneView.planeRenderer.planeRendererMode =
+                PlaneRenderer.PlaneRendererMode.RENDER_TOP_MOST
             it.arSceneView.planeRenderer.isEnabled = false
+            it.arSceneView.planeRenderer.isVisible = false
+
             it.arSceneView.session.let { session ->
                 session?.configure(session.config.apply {
-
+                    augmentedFaceMode = Config.AugmentedFaceMode.DISABLED
+                    cloudAnchorMode = Config.CloudAnchorMode.DISABLED
+                    geospatialMode = Config.GeospatialMode.DISABLED
+                    instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
                     planeFindingMode = Config.PlaneFindingMode.DISABLED
-                    updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                    updateMode = Config.UpdateMode.BLOCKING
                     lightEstimationMode = Config.LightEstimationMode.DISABLED
-                    focusMode = Config.FocusMode.AUTO
+                    focusMode = Config.FocusMode.FIXED
+                    depthMode = Config.DepthMode.DISABLED
 
+                    setPlaneFindingMode(null)
                     onTrackballEvent(null)
                 })
             }
@@ -97,13 +91,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         //get compass
-        compass=Compass(this,object : CompassListener {
+        compass = Compass(this, object : CompassListener {
             @SuppressLint("SetTextI18n")
-            override fun onNewAzimuth(aziInDeg: Float, magneticDeclination: Float, orientation: FloatArray) {
+            override fun onNewAzimuth(
+                aziInDeg: Float,
+                magneticDeclination: Float,
+                orientation: FloatArray
+            ) {
                 orientationAngles = orientation
                 compassView.rotation = -aziInDeg
                 azimuthInDegrees = aziInDeg
-                azimuthView.text = "azimuth: $azimuthInDegrees° \nmagneticDeclination: $magneticDeclination° \norientation: ${orientation[0]}°, ${orientation[1]}°, ${orientation[2]}° \nlocation: ${currentLocation?.latitude}, ${currentLocation?.longitude}"
+                azimuthView.text =
+                    "azimuth: $azimuthInDegrees° \nmagneticDeclination: $magneticDeclination° \norientation: ${orientation[0]}°, ${orientation[1]}°, ${orientation[2]}° \nlocation: ${currentLocation?.latitude}, ${currentLocation?.longitude}"
             }
 
             override fun getCurrentLocation(location: Location) {
@@ -135,14 +134,14 @@ class MainActivity : AppCompatActivity() {
                             override fun onPoiResponse(poiList: List<Poi>) {
                                 Log.d(TAG, "onPoiResponse: ${poiList.size}")
                                 lifecycleScope.launch {
-                                    makeAnchorNode(poiList)
+                                    //makeAnchorNode(poiList)
                                 }
                             }
 
                             override fun onPoiDirectionResponse(coordinates: List<Coordinate>) {
                                 Log.d(TAG, "onPoiDirectionResponse: $coordinates")
                                 lifecycleScope.launch {
-                                    makeAnchorNodeForPoiDirections(coordinates)
+                                    //makeAnchorNodeForPoiDirections(coordinates)
                                 }
                             }
                         })
@@ -175,12 +174,19 @@ class MainActivity : AppCompatActivity() {
                 currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
             )
 
-            val test=(atan2(poi.latitude - currentLocation!!.latitude, poi.longitude - currentLocation!!.longitude))-orientationAngles[0]
-            val testDistance=(sqrt((poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(2)))*100
-            val testX=cos(test)*testDistance
-            val testY=sin(test)*testDistance
+            val test = (atan2(
+                poi.latitude - currentLocation!!.latitude,
+                poi.longitude - currentLocation!!.longitude
+            )) - orientationAngles[0]
+            val testDistance = (sqrt(
+                (poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(
+                    2
+                )
+            )) * 100
+            val testX = cos(test) * testDistance
+            val testY = sin(test) * testDistance
 
-            val pose=Pose.makeTranslation(testX.toFloat(), 0.4f, testY.toFloat())
+            val pose = Pose.makeTranslation(testX.toFloat(), 0.4f, testY.toFloat())
             //val pose = translateToARCoreCoordinates(distance, bearing)
             pose.let { validPose ->
                 val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
@@ -251,16 +257,37 @@ class MainActivity : AppCompatActivity() {
         }
         Toast.makeText(this, " virtual compass", Toast.LENGTH_SHORT).show()
         val poseListSurrounding = listOf(
-            Pair(translateToARCoreCoordinates(2.0, 0.0),"virtualNorth"),
-            Pair(translateToARCoreCoordinates(2.0, 95.0),"virtualNorth+95"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0.0)),"North + 0"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(45.0)),"NorthEast + 45"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90.0)),"East + 90"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(135.0)),"SouthEast + 135"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180.0)),"South + 180"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(225.0)),"SouthWest + 225"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(270.0)),"West + 270"),
-            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(315.0)),"NorthWest + 315")
+            Pair(translateToARCoreCoordinates(2.0, 0.0), "virtualNorth"),
+            Pair(translateToARCoreCoordinates(2.0, 95.0), "virtualNorth+95"),
+            Pair(translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(0f)), "North + 0"),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(45f)),
+                "NorthEast + 45"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(90f)),
+                "East + 90"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(135f)),
+                "SouthEast + 135"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(180f)),
+                "South + 180"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(225f)),
+                "SouthWest + 225"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(270f)),
+                "West + 270"
+            ),
+            Pair(
+                translateToARCoreCoordinates(2.0, calibrateBearingToWorldNorth(315f)),
+                "NorthWest + 315"
+            )
         )
 
         poseListSurrounding.map { validPose ->
@@ -271,13 +298,17 @@ class MainActivity : AppCompatActivity() {
 
             // Add the place in AR
             val placeNode = PlaceNode(this@MainActivity, validPose.second)
-            Log.d(TAG, "placeAnchorNodeForNorth:bearing valid pose ${validPose.first}, ${validPose.second}")
+            Log.d(
+                TAG,
+                "placeAnchorNodeForNorth:bearing valid pose ${validPose.first}, ${validPose.second}"
+            )
 
             placeNode.parent = anchorNode
 
             Toast.makeText(this, "N", Toast.LENGTH_SHORT).show()
         }
     }
+
     fun getCompassDirection(azimuth: Float): String {
         return when (azimuth) {
             in 337.5..360.0 -> "N"
@@ -296,39 +327,40 @@ class MainActivity : AppCompatActivity() {
     fun makePositiveRange(azimuth: Float): Float {
         var positiveAzimuth = azimuth
 
-        if (positiveAzimuth<-360f){
+        if (positiveAzimuth < -360f) {
             positiveAzimuth %= -360f
             positiveAzimuth += 360f
-        }else if (positiveAzimuth>360f){
+        } else if (positiveAzimuth > 360f) {
             positiveAzimuth %= 360f
-        }else if (positiveAzimuth<0){
+        } else if (positiveAzimuth < 0) {
             positiveAzimuth += 360f
         }
 
         return positiveAzimuth
     }
 
-    private fun calibrateBearingToWorldNorth(bearing: Double): Double {
+    private fun calibrateBearingToWorldNorth(bearing: Float): Double {
 //        var bearingToTrueNorth = bearing - trueNorth - 90.0
         val calibrateVirtualNorth = 180.0//virtual north always 180 angled from camera view
-        val trueNorth=-azimuthInDegrees*1000/1000.0
-        var bearingToTrueNorth = if (bearing > trueNorth) {
-            bearing - trueNorth
-        } else {
-            trueNorth - bearing
+        var trueNorth = -azimuthInDegrees
+        trueNorth = makePositiveRange(trueNorth)
+        var positiveBearing = makePositiveRange(bearing)
+        var bearingToTrueNorth = positiveBearing - trueNorth
+
+        var clockwiseBearing = 360 - makePositiveRange(bearingToTrueNorth)
+
+        when(bearing){
+            0f-> Log.d(TAG, "calibrateBearingToWorldNorth: North clockwise $clockwiseBearing")
+            90f-> Log.d(TAG, "calibrateBearingToWorldNorth: East counterclockwise $clockwiseBearing")
+            180f-> Log.d(TAG, "calibrateBearingToWorldNorth: South clockwise $clockwiseBearing")
+            270f-> Log.d(TAG, "calibrateBearingToWorldNorth: West counterclockwise $clockwiseBearing")
         }
 
-//        if (abs(bearingToTrueNorth) > 360.0) {
-//            bearingToTrueNorth %= 360.0
-//        }
-
-//        bearingToTrueNorth = -bearingToTrueNorth
-
-//        if (bearingToTrueNorth < 0) {
-//            bearingToTrueNorth += 360.0
-//        }
-        Log.d(TAG, "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) = ($bearingToTrueNorth)")
-        return bearingToTrueNorth
+        Log.d(
+            TAG,
+            "calibrateBearingToWorldNorth: bearing ($bearing) - trueNorth ($trueNorth) = ($clockwiseBearing)"
+        )
+        return clockwiseBearing.toDouble()
     }
 
     private val kilometerToMeter = 50.0
@@ -350,9 +382,15 @@ class MainActivity : AppCompatActivity() {
 
     //calibrate bearing to real world north
     private fun calibrateBearingToWorldNorthV2(poiLatLng: LatLng): Double {
-        val heading = LatLng(currentLocation!!.latitude, currentLocation!!.longitude).sphericalHeading(poiLatLng)
+        val heading =
+            LatLng(currentLocation!!.latitude, currentLocation!!.longitude).sphericalHeading(
+                poiLatLng
+            )
         val bearingToTrueNorth = orientationAngles[0] + heading
-        Log.d(TAG, "calibrateBearingToWorldNorthV2: bearing (${orientationAngles[0]}) + trueNorth ($heading) = ($bearingToTrueNorth)")
+        Log.d(
+            TAG,
+            "calibrateBearingToWorldNorthV2: bearing (${orientationAngles[0]}) + trueNorth ($heading) = ($bearingToTrueNorth)"
+        )
         return bearingToTrueNorth
     }
 
@@ -386,7 +424,7 @@ class MainActivity : AppCompatActivity() {
 
         val bearingFromTrueNorth = Math.toDegrees(atan2(y, x))
         //calibrate bearing to real world north
-        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth)
+        val bearing = calibrateBearingToWorldNorth(bearingFromTrueNorth.toFloat()).toDouble()
 
 //        val bearing = calibrateBearingToWorldNorthV2(poiLatLng = LatLng(poiLat, poiLon))
 
