@@ -1,16 +1,10 @@
 package com.ihsan.arcore_sceneform.api
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.location.Location
 import android.util.Log
-import androidx.core.app.ActivityCompat
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.ihsan.arcore_sceneform.MainActivity
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
 import com.ihsan.arcore_sceneform.models.PoiDirectionResponse
@@ -20,12 +14,12 @@ import okio.IOException
 
 private const val TAG = "ApiService"
 
-class ApiService(val currentLocation:Location,val apiResponse: ApiResponse) {
+class ApiService(val currentLocation: Location, val apiResponse: ApiResponse) {
 
-    val api = "037eff850f2e4b11b0ffacb5a381c7f2"
+    private val api = "037eff850f2e4b11b0ffacb5a381c7f2"
 
     init {
-            fetchPoi(currentLocation.latitude, currentLocation.longitude)
+        fetchPoi(currentLocation.latitude, currentLocation.longitude)
     }
 
     private fun fetchPoi(lat: Double, lng: Double, radius: Int = 5000) {

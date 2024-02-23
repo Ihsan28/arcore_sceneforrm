@@ -16,7 +16,6 @@ import com.google.ar.core.Config
 import com.google.ar.core.Pose
 import com.google.ar.sceneform.AnchorNode
 import com.google.ar.sceneform.rendering.PlaneRenderer
-import com.google.ar.sceneform.ux.TransformableNode
 import com.google.maps.android.ktx.utils.sphericalHeading
 import com.ihsan.arcore_sceneform.api.ApiResponse
 import com.ihsan.arcore_sceneform.api.ApiService
@@ -176,6 +175,7 @@ class MainActivity : AppCompatActivity() {
 
         poiList.forEach { poi ->
 
+            //distance and bearing using haversine formula
             val (distance, bearing) = calculateDistanceAndBearing(
                 currentLocation!!.latitude, currentLocation!!.longitude, poi.latitude, poi.longitude
             )
@@ -189,10 +189,13 @@ class MainActivity : AppCompatActivity() {
                     2
                 )
             )) * 100
-            val testX = cos(test) * testDistance
-            val testY = sin(test) * testDistance
 
-            val pose = Pose.makeTranslation(testX.toFloat(), 0.4f, testY.toFloat())
+            //ar coordinate
+            val testX = cos(test) * testDistance
+            val testY = 0.4f
+            val testZ = sin(test) * testDistance
+
+            val pose = Pose.makeTranslation(testX.toFloat(), testY, testZ.toFloat())
             //val pose = translateToARCoreCoordinates(distance, bearing)
             pose.let { validPose ->
                 val anchor = arFragment.arSceneView.session!!.createAnchor(validPose)
