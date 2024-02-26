@@ -63,4 +63,13 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.1.0")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-utils-ktx:0.2")
+
+    // CardView
+    implementation ("androidx.cardview:cardview:1.0.0")
+
+    // Glide
+    implementation ("com.github.bumptech.glide:glide:4.12.0")
+    // ViewModel and LiveData
+    implementation ("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation ("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
 }

@@ -8,56 +8,97 @@ import com.google.gson.JsonObject
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi
 import com.ihsan.arcore_sceneform.models.PoiDirectionResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.IOException
 
 private const val TAG = "ApiService"
 
-class ApiService(val currentLocation: Location, val apiResponse: ApiResponse) {
+class ApiService(val apiResponse: ApiResponse) {
 
     private val api = "037eff850f2e4b11b0ffacb5a381c7f2"
 
     init {
-        fetchPoi(currentLocation.latitude, currentLocation.longitude)
+        //fetchPoi(currentLocation.latitude, currentLocation.longitude)
     }
 
-    private fun fetchPoi(lat: Double, lng: Double, radius: Int = 5000) {
-        val url =
-            "https://api.geoapify.com/v2/places?categories=religion&filter=circle:$lng,$lat,$radius&bias=proximity:$lng,$lat&limit=20&apiKey=$api"
-        Log.d(TAG, "fetchPoi: $url")
-        val client = OkHttpClient()
-        val request = Request.Builder().url(url).build()
+//    fun fetchPoi(lat: Double, lng: Double, radius: Int = 5000) {
+//        val url =
+//            "https://api.geoapify.com/v2/places?categories=religion&filter=circle:$lng,$lat,$radius&bias=proximity:$lng,$lat&limit=20&apiKey=$api"
+//        Log.d(TAG, "fetchPoi: $url")
+//        val client = OkHttpClient()
+//        val request = Request.Builder().url(url).build()
+//
+//        client.newCall(request).enqueue(object : okhttp3.Callback {
+//            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+//                if (response.isSuccessful) {
+//                    val responseBody = response.body?.string()
+//                    // Parse the response and cache the POIs
+//                    val poiList = parsePoiResponse(responseBody ?: "")
+//
+//                    Log.d(TAG, "onResponse: $poiList")
+//                    apiResponse.onPoiResponse(poiList)
+//
+//                    fetchPoiDirection(
+//                        Coordinate(
+//                            currentLocation.latitude, currentLocation.longitude
+//                        ), Coordinate(
+//                            poiList[0].latitude, poiList[0].longitude
+//                        )
+//                    )
+//                    return
+//                } else {
+//                    Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
+//                    apiResponse.onError(response.message)
+//                }
+//            }
+//
+//            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+//                apiResponse.onError(e.message ?: "")
+//                Log.e(TAG, "fetchPoi failed: ${e.message}")
+//            }
+//        })
+//    }
 
-        client.newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string()
-                    // Parse the response and cache the POIs
-                    val poiList = parsePoiResponse(responseBody ?: "")
+    suspend fun fetchPoi(lat: Double, lng: Double,currentLocation:Location, radius: Int = 5000): List<Poi> {
+        return withContext(Dispatchers.IO) {
+            val url =
+                "https://api.geoapify.com/v2/places?categories=religion&filter=circle:$lng,$lat,$radius&bias=proximity:$lng,$lat&limit=20&apiKey=$api"
+            Log.d(TAG, "fetchPoi: $url")
 
-                    Log.d(TAG, "onResponse: $poiList")
-                    apiResponse.onPoiResponse(poiList)
+            val request = Request.Builder().url(url).build()
 
-                    fetchPoiDirection(
-                        Coordinate(
-                            currentLocation!!.latitude, currentLocation!!.longitude
-                        ), Coordinate(
-                            poiList[0].latitude, poiList[0].longitude
+            try {
+                val response = OkHttpClient().newCall(request).execute()
+                val responseBody = response.body?.string()
+
+                if (response.isSuccessful && !responseBody.isNullOrBlank()) {
+                    val poiList = parsePoiResponse(responseBody)
+                    // Fetch POI directions for the first POI, if any
+                    if (poiList.isNotEmpty()) {
+                        fetchPoiDirection(
+                            Coordinate(
+                                currentLocation.latitude,
+                                currentLocation.longitude
+                            ),
+                            Coordinate(
+                                poiList[0].latitude,
+                                poiList[0].longitude
+                            )
                         )
-                    )
-                    return
+                    }
+                    return@withContext poiList
                 } else {
                     Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
-                    apiResponse.onError(response.message)
+                    throw IOException("Error fetching POI data: ${response.message}")
                 }
-            }
-
-            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                apiResponse.onError(e.message ?: "")
+            } catch (e: IOException) {
                 Log.e(TAG, "fetchPoi failed: ${e.message}")
+                throw e
             }
-        })
+        }
     }
 
     fun parsePoiResponse(jsonResponse: String): List<Poi> {
@@ -96,48 +137,94 @@ class ApiService(val currentLocation: Location, val apiResponse: ApiResponse) {
         return gson.fromJson(jsonResponse, PoiDirectionResponse::class.java)
     }
 
-    private fun fetchPoiDirection(start: Coordinate, end: Coordinate) {
-        Log.d(TAG, "fetchPoiDirection: $start ////// $end")
+//    private fun fetchPoiDirection(start: Coordinate, end: Coordinate) {
+//        Log.d(TAG, "fetchPoiDirection: $start ////// $end")
+//
+//        val url =
+//            "https://api.geoapify.com/v1/routing?waypoints=${start.lat},${start.lon}|${end.lat},${end.lon}&mode=walk&apiKey=$api"
+//
+//        Log.d(TAG, "fetchPoi: $url")
+//        val client = OkHttpClient()
+//        val request = Request.Builder().url(url).build()
+//
+//        client.newCall(request).enqueue(object : okhttp3.Callback {
+//            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+//                if (response.isSuccessful) {
+//                    val responseBody = response.body?.string()
+//                    Log.d(TAG, "fetchPoi direction response: $responseBody")
+//
+//                    // Parse the response using the new data classes
+//                    try {
+//                        val poiResponse = parsePoiDirectionResponse(responseBody ?: "")
+//                        Log.d(TAG, "fetchPoi direction response: $poiResponse")
+////                        val legs = poiResponse.features[0].properties.legs
+//                        val coordinates =
+//                            poiResponse.features.flatMap { it.geometry.coordinates.flatten() }
+//                                .map { Coordinate(it[1], it[0]) }
+//
+//                        apiResponse.onPoiDirectionResponse(coordinates)
+//
+//                    } catch (e: Exception) {
+//                        apiResponse.onError(e.message ?: "")
+//                        Log.e(TAG, "Error parsing POI response: ${e.message}")
+//                    }
+//
+//                } else {
+//                    apiResponse.onError(response.message)
+//                    Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
+//                }
+//            }
+//
+//            override fun onFailure(call: okhttp3.Call, e: IOException) {
+//                apiResponse.onError(e.message ?: "")
+//                Log.e(TAG, "fetchPoi failed: ${e.message}")
+//            }
+//        })
+//    }
 
-        val url =
-            "https://api.geoapify.com/v1/routing?waypoints=${start.lat},${start.lon}|${end.lat},${end.lon}&mode=walk&apiKey=$api"
+    suspend fun fetchPoiDirection(start: Coordinate, end: Coordinate): List<Coordinate> {
+        return withContext(Dispatchers.IO) {
+            Log.d(TAG, "fetchPoiDirection: $start ////// $end")
 
-        Log.d(TAG, "fetchPoi: $url")
-        val client = OkHttpClient()
-        val request = Request.Builder().url(url).build()
+            val url =
+                "https://api.geoapify.com/v1/routing?waypoints=${start.lat},${start.lon}|${end.lat},${end.lon}&mode=walk&apiKey=$api"
 
-        client.newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+            Log.d(TAG, "fetchPoiDirection URL: $url")
+            val request = Request.Builder().url(url).build()
+
+            try {
+                val response = OkHttpClient().newCall(request).execute()
+
                 if (response.isSuccessful) {
                     val responseBody = response.body?.string()
-                    Log.d(TAG, "fetchPoi direction response: $responseBody")
+                    Log.d(TAG, "fetchPoiDirection response: $responseBody")
 
                     // Parse the response using the new data classes
                     try {
                         val poiResponse = parsePoiDirectionResponse(responseBody ?: "")
-                        Log.d(TAG, "fetchPoi direction response: $poiResponse")
-                        val legs = poiResponse.features[0].properties.legs
-                        val coordinates =
-                            poiResponse.features.flatMap { it.geometry.coordinates.flatten() }
-                                .map { Coordinate(it[1], it[0]) }
+                        Log.d(TAG, "fetchPoiDirection response: $poiResponse")
 
-                        apiResponse.onPoiDirectionResponse(coordinates)
+                        val coordinates = poiResponse.features
+                            .flatMap { it.geometry.coordinates.flatten() }
+                            .map { Coordinate(it[1], it[0]) }
 
+                        return@withContext coordinates
                     } catch (e: Exception) {
                         apiResponse.onError(e.message ?: "")
                         Log.e(TAG, "Error parsing POI response: ${e.message}")
+                        return@withContext emptyList()
                     }
-
                 } else {
+                    Log.e(TAG, "fetchPoiDirection unsuccessful: ${response.code}")
                     apiResponse.onError(response.message)
-                    Log.e(TAG, "fetchPoi unsuccessful: ${response.code}")
+                    return@withContext emptyList()
                 }
-            }
-
-            override fun onFailure(call: okhttp3.Call, e: IOException) {
+            } catch (e: IOException) {
+                Log.e(TAG, "fetchPoiDirection failed: ${e.message}")
                 apiResponse.onError(e.message ?: "")
-                Log.e(TAG, "fetchPoi failed: ${e.message}")
+                return@withContext emptyList()
             }
-        })
+        }
     }
+
 }

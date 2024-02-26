@@ -3,15 +3,18 @@ package com.ihsan.arcore_sceneform.models
 import com.google.android.gms.maps.model.LatLng
 import com.google.ar.sceneform.math.Vector3
 import com.google.maps.android.ktx.utils.sphericalHeading
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 data class Poi(
     val id: String,
     val name: String,
     val latitude: Double,
     val longitude: Double,
-    val distance: Double = 0.0
+    var distance: Double = 0.0,
+    var angle: Float = 0f
 ){
     override fun equals(other: Any?): Boolean {
         if (other !is Poi) {
