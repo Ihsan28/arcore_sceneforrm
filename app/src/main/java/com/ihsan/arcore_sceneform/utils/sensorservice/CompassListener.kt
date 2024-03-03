@@ -1,4 +1,4 @@
-package com.ihsan.arcore_sceneform.sensorservice
+package com.ihsan.arcore_sceneform.utils.sensorservice
 
 import android.graphics.drawable.GradientDrawable.Orientation
 import android.location.Location

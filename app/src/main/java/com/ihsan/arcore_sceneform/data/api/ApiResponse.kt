@@ -1,4 +1,4 @@
-package com.ihsan.arcore_sceneform.api
+package com.ihsan.arcore_sceneform.data.api
 
 import com.ihsan.arcore_sceneform.models.Coordinate
 import com.ihsan.arcore_sceneform.models.Poi

@@ -1,4 +1,4 @@
-package com.ihsan.arcore_sceneform.data.models
+package com.ihsan.arcore_sceneform.models.googleApimodels
 
 class Results {
 

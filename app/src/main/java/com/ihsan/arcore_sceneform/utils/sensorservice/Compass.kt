@@ -1,4 +1,4 @@
-package com.ihsan.arcore_sceneform.sensorservice
+package com.ihsan.arcore_sceneform.utils.sensorservice
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -23,7 +23,6 @@ import androidx.core.content.getSystemService
 import androidx.lifecycle.MutableLiveData
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import com.google.android.gms.maps.model.LatLng
 import kotlin.math.abs
 
 class Compass(activity: Activity,val listener: CompassListener): SensorEventListener {
