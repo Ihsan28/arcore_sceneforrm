@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.GeomagneticField
@@ -19,13 +20,12 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
-import androidx.core.content.getSystemService
 import androidx.lifecycle.MutableLiveData
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import kotlin.math.abs
 
-class Compass(activity: Activity,val listener: CompassListener): SensorEventListener {
+class Compass(application: Application, val listener: CompassListener): SensorEventListener {
 
     private val TAG = "Compass"
 
@@ -62,17 +62,17 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
     private val windowSize = 2 // Size of the moving average window
     private val azimuthQueue = ArrayDeque<Float>(windowSize)
     private var lastAzimuthDisplayed = 0f
-    private var activityComapass: Activity
+    private var applicationCompass: Application
     private var locationListener: LocationListener
 
     init {
-        this.activityComapass=activity
-        sensorManager = activity.getSystemService()!!
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(activity)
+        this.applicationCompass=application
 
         //testing
-        sensorManager = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        locationManager = activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        sensorManager = applicationCompass.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        locationManager = applicationCompass.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationCompass)
 
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
@@ -117,9 +117,9 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
 
     private fun checkPermission(){
         if (ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_FINE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_COARSE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             return
@@ -197,9 +197,9 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
 
     private fun requestLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_FINE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_COARSE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             return
@@ -326,9 +326,9 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
 
     private fun getCurrentLocation(onSuccess: (Location) -> Unit) {
         if (ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_FINE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                activityComapass, Manifest.permission.ACCESS_COARSE_LOCATION
+                applicationCompass, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             return
@@ -341,17 +341,4 @@ class Compass(activity: Activity,val listener: CompassListener): SensorEventList
             Log.e(TAG, "Could not get location")
         }
     }
-
-    private fun isSupportedDevice(): Boolean {
-        val activityManager = activityComapass.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val openGlVersionString = activityManager.deviceConfigurationInfo.glEsVersion
-        if (openGlVersionString.toDouble() < 3.0) {
-            Toast.makeText(activityComapass, "Sceneform requires OpenGL ES 3.0 or later", Toast.LENGTH_LONG)
-                .show()
-            activityComapass.finish()
-            return false
-        }
-        return true
-    }
-
 }

@@ -104,7 +104,7 @@ class ArNavigationFragment : Fragment() {
         }
 
         //get compass
-        compass = Compass(requireActivity(), object : CompassListener {
+        compass = Compass(requireActivity().application, object : CompassListener {
             @SuppressLint("SetTextI18n")
             override fun onNewAzimuth(
                 aziInDeg: Float,
