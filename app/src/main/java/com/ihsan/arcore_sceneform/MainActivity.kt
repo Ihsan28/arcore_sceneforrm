@@ -1,5 +1,6 @@
 package com.ihsan.arcore_sceneform
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
 import android.location.Location
@@ -7,25 +8,20 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.gms.maps.model.LatLng
-import com.ihsan.arcore_sceneform.utils.sensorservice.Compass
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        getAdditionalPermissions()
+        isSupportedDevice()
     }
 
-    override fun onResume() {
-        super.onResume()
-    }
-
-    override fun onPause() {
-        super.onPause()
-    }
+    private fun getAdditionalPermissions(): Array<String> =
+        listOf(Manifest.permission.ACCESS_FINE_LOCATION).toTypedArray()
 
 
     private fun isSupportedDevice(): Boolean {
@@ -40,7 +36,7 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-}//MainActivity
+}
 
 val Location.latLng: LatLng
     get() = LatLng(this.latitude, this.longitude)
