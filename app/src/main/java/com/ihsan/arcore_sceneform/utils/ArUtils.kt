@@ -112,6 +112,7 @@ class ArUtils {
     private fun calibrateBearingToWorldNorth(bearing: Float, azimuthInDegrees: Float): Double {
         var trueNorth = azimuthInDegrees+180//ar 180 calibrate with true north
         trueNorth = makePositiveRange(trueNorth)
+        Log.d(TAG, "calibrateBearingToWorldNorth: raw value: bearing $bearing azimuthInDegrees $azimuthInDegrees  trueNorth $trueNorth ")
         val positiveBearing = makePositiveRange(bearing)
         val bearingToTrueNorth = positiveBearing - trueNorth
 
@@ -119,7 +120,7 @@ class ArUtils {
 
         Log.d(
             TAG,
-            "calibrateBearingToWorldNorth: bearing ($positiveBearing) - trueNorth ($trueNorth) = ($clockwiseBearing)"
+            "calibrateBearingToWorldNorth: bearing ($positiveBearing) - trueNorth ($trueNorth) = (360-) ($clockwiseBearing)"
         )
         return clockwiseBearing.toDouble()
     }

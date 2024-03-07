@@ -95,11 +95,11 @@ class ArNavigationFragment : Fragment() {
             it.arSceneView.scene.camera.nearClipPlane = 0.1f
             it.arSceneView.scene.camera.farClipPlane = 5000f
         }
-
+        var size=0
 
         arFragment.setOnTapArPlaneListener { hitResult, plane, motionEvent ->
             // Do something with the tap
-            val size = arFragment.arSceneView.session?.allAnchors?.size
+            size = arFragment.arSceneView.session?.allAnchors?.size!!
             Toast.makeText(context, "size: $size", Toast.LENGTH_SHORT).show()
         }
 
@@ -138,14 +138,16 @@ class ArNavigationFragment : Fragment() {
 
                         viewmodel.poiList.observe(viewLifecycleOwner) {
                             it?.let {
-                                Toast.makeText(context, it.size, Toast.LENGTH_SHORT).show()
-                                makeAnchorNode(it)
+                                size = arFragment.arSceneView.session?.allAnchors?.size!!
+                                if (size<20){
+                                    makeAnchorNode(it)
+                                }
+
                             }
                         }
 
                         viewmodel.poiDirection.observe(viewLifecycleOwner) {
                             it?.let {
-                                Toast.makeText(context, it.size, Toast.LENGTH_SHORT).show()
                                 makeAnchorNodeForPoiDirections(it)
                             }
                         }
@@ -174,12 +176,15 @@ class ArNavigationFragment : Fragment() {
             val testBearing = (atan2(
                 poi.latitude - currentLocation!!.latitude,
                 poi.longitude - currentLocation!!.longitude
-            ))
+            ))*180/Math.PI
+
             val testDistance = (sqrt(
                 (poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(
                     2
                 )
-            )) * 100
+            )) * 500
+
+            Log.d(TAG, "makeAnchorNode: testBearing $testBearing testDistance $testDistance azimuthInDegrees $azimuthInDegrees")
 
             val pose = au.translateToARCoreCoordinates(
                 testDistance,
