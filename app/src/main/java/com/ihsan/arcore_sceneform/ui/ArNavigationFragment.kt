@@ -1,6 +1,5 @@
 package com.ihsan.arcore_sceneform.ui
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.location.Location
 import android.os.Bundle
@@ -12,7 +11,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.viewModels
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.google.ar.core.Config
 import com.google.ar.core.TrackingState
@@ -43,7 +42,9 @@ class ArNavigationFragment : Fragment() {
     private lateinit var arFragment: ArFragment
     private lateinit var compassView: ImageView
     private lateinit var azimuthView: TextView
-    private val viewmodel: PoiViewModel by viewModels()
+
+    //    private val viewmodel: PoiViewModel by viewModels()
+    private lateinit var viewmodel: PoiViewModel
     private val au = ArUtils()
 
     private var anchorNode: AnchorNode? = null
@@ -66,6 +67,7 @@ class ArNavigationFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        viewmodel = ViewModelProvider(requireActivity())[PoiViewModel::class.java]
 
         arFragment = childFragmentManager.findFragmentById(R.id.arFragment) as ArFragment
         compassView = view.findViewById(R.id.compass_view)
@@ -119,8 +121,8 @@ class ArNavigationFragment : Fragment() {
             }
 
             override fun getCurrentLocation(location: Location) {
+                Toast.makeText(requireContext(), "location : $location", Toast.LENGTH_SHORT).show()
                 lifecycleScope.launch {
-
                     // Wait for ARCore to be ready
                     while (arFragment.arSceneView.arFrame!!.camera.trackingState != TrackingState.TRACKING) {
                         Log.d(TAG, "getCurrentLocation: waiting for plane")
