@@ -17,7 +17,7 @@
         android:layout_height="200dp"
         android:src="@drawable/compass"
         android:layout_alignParentBottom="true"
-        android:contentDescription="@string/comapass_view" />
+        android:contentDescription="@string/compass_view" />
     <TextView
         android:id="@+id/azimuth"
         android:layout_width="wrap_content"

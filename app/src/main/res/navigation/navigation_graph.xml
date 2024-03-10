@@ -7,7 +7,7 @@
 
     <fragment
         android:id="@+id/arNavigationFragment"
-        android:name="com.ihsan.arcore_sceneform.ui.ArNavigationFragment"
+        android:name="com.ihsan.ar_navigation.ui.ArNavigationFragment"
         android:label="fragment_ar_navigation"
         tools:layout="@layout/fragment_ar_navigation" >
         <action
@@ -16,7 +16,7 @@
     </fragment>
     <fragment
         android:id="@+id/mapFragment"
-        android:name="com.ihsan.arcore_sceneform.ui.MapFragment"
+        android:name="com.ihsan.ar_navigation.ui.MapFragment"
         android:label="fragment_map"
         tools:layout="@layout/fragment_map" >
         <action

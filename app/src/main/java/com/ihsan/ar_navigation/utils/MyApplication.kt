@@ -1,0 +1,9 @@
+package com.ihsan.ar_navigation.utils
+
+import android.app.Application
+
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+    }
+}
