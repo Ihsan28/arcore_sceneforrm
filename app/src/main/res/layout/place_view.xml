@@ -7,8 +7,7 @@
     <ImageView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:src="@mipmap/pin_full_color"/>
+        android:layout_gravity="center"/>
 
     <TextView
         android:id="@+id/placeName"

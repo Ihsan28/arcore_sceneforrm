@@ -18,6 +18,7 @@ import com.google.ar.core.TrackingState
 import com.google.ar.sceneform.AnchorNode
 import com.google.ar.sceneform.rendering.PlaneRenderer
 import com.google.ar.sceneform.ux.ArFragment
+import com.ihsan.ar_navigation.MainActivity
 import com.ihsan.ar_navigation.R
 import com.ihsan.ar_navigation.ar.PathNode
 import com.ihsan.ar_navigation.ar.PlaceNode
@@ -156,9 +157,7 @@ class ArNavigationFragment : Fragment() {
                     }
                 }
             }
-
         })
-
     }
 
     private fun makeAnchorNode(poiList: List<Poi>) {
@@ -184,7 +183,7 @@ class ArNavigationFragment : Fragment() {
                 (poi.latitude - currentLocation!!.latitude).pow(2) + (poi.longitude - currentLocation!!.longitude).pow(
                     2
                 )
-            )) * 500
+            )) * 100
 
             Log.d(TAG, "makeAnchorNode: testBearing $testBearing testDistance $testDistance azimuthInDegrees $azimuthInDegrees")
 

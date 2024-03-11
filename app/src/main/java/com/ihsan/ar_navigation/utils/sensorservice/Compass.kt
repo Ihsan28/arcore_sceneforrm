@@ -107,6 +107,7 @@ class Compass(application: Application, val listener: CompassListener): SensorEv
         }
 
         getCurrentLocation {
+            Log.d(TAG, "init: getCurrentLocation: $it")
             currentLocation = it
             listener.getCurrentLocation(it)
         }
@@ -202,6 +203,7 @@ class Compass(application: Application, val listener: CompassListener): SensorEv
                 applicationCompass, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "getCurrentLocation: Permission not granted")
             return
         }
         locationManager.requestLocationUpdates(
@@ -331,6 +333,7 @@ class Compass(application: Application, val listener: CompassListener): SensorEv
                 applicationCompass, Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "getCurrentLocation: Permission not granted")
             return
         }
         fusedLocationClient.lastLocation.addOnSuccessListener { location ->

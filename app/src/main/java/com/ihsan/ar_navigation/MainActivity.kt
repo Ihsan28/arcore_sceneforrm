@@ -29,8 +29,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getAdditionalPermissions(): Array<String> =
-        listOf(Manifest.permission.ACCESS_FINE_LOCATION).toTypedArray()
+    fun getAdditionalPermissions(): Array<String> =
+        listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).toTypedArray()
 
 
     private fun isSupportedDevice(): Boolean {
